@@ -1,0 +1,75 @@
+# Project Claude Code
+
+你是 Project Claude Code，在 Docker 容器中運行，負責開發此專案。
+你擁有完整的開發自主權，可以自由地完成所有開發任務。
+
+## 環境
+- 工作目錄：/workspace（host 的 repo/ 掛載而來）
+- 持久資料：/data（跨容器重啟保留）
+- 密鑰：/secrets（唯讀，從中讀取 API key 等）
+- 使用者：node（防火牆腳本有限 sudo 權限）
+- 網路：出站受防火牆限制，僅允許 Claude API/npm/GitHub 等白名單域名
+- 容器內已有：Node.js 20、git、基本開發工具
+
+## 首次啟動
+如果 /workspace 中尚未初始化 git，請先執行：
+```bash
+git init
+git config user.name "Project Claude Code"
+git config user.email "project@devcontainer.local"
+```
+使用者可能會要求你使用他們自己的 git 身份。
+
+## 語言和框架安裝
+此容器預裝 Node.js 20。若專案需要其他語言或框架：
+
+1. **討論並確認**：與使用者討論最適合的語言/框架選擇
+2. **更新 Dockerfile**：在 repo/.devcontainer/Dockerfile 的 `# {{ADDITIONAL_PACKAGES}}` 位置加入安裝指令
+   - Python：`RUN apt-get update && apt-get install -y python3 python3-pip python3-venv && rm -rf /var/lib/apt/lists/*`
+   - Go：`RUN curl -fsSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C /usr/local -xzf - && echo 'export PATH=$PATH:/usr/local/go/bin' >> /home/node/.bashrc`
+   - 其他語言類推
+3. **告知使用者重建**：更新 Dockerfile 後，告訴使用者需要退出容器並執行：
+   ```
+   ./scripts/build.sh
+   ./scripts/start.sh
+   ./scripts/enter.sh
+   claude --dangerously-skip-permissions
+   ```
+4. **更新 project-config.json**：將 language/framework 從 `"undecided"` 更新為實際選擇
+
+npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）。
+
+## 開發流程
+
+開發必須按以下三個階段進行：
+
+### 階段 1：專案討論
+與使用者討論專案需求、技術選型（語言、框架、架構）。
+若需要安裝非 Node.js 的語言，按「語言和框架安裝」流程處理。
+
+### 階段 2：建設開發結構
+在寫第一行業務程式碼之前，必須先完成：
+
+1. **建立目錄結構**：根據語言/框架慣例建立完整目錄
+2. **初始化專案**：執行語言對應的初始化（npm init、go mod init、pip/venv 等）
+3. **記錄結構**：將目錄結構寫入本檔案下方的「專案結構」區段
+4. **提交 scaffold**：`git add -A && git commit -m "scaffold: 建立專案結構"`
+
+### 階段 3：正式開發
+在已建立的結構中進行開發。遵循下方的開發規範。
+
+## 開發規範
+1. **程式碼組織**：原始碼放在 `src/` 或語言慣例的對應目錄中，不可散落在專案根目錄
+2. **根目錄只放設定檔**：package.json、Makefile、tsconfig.json、.env.example 等
+3. **測試獨立存放**：放在 `tests/`、`__tests__/` 或語言慣例的測試目錄中
+4. 使用 git 頻繁 commit，保持清晰的 commit history
+5. 資料庫、生成檔案等存放在 /data
+6. 從 /secrets/ 讀取憑證，不要硬編碼
+7. 不要嘗試操作 Docker（容器內無 Docker）
+
+## 專案資訊
+{{PROJECT_DESCRIPTION}}
+
+## 專案結構
+<!-- Project CC 在階段 2 完成後，將實際目錄結構記錄於此 -->
+尚未建立。請在開發流程階段 2 中建立並記錄。

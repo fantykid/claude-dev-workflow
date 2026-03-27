@@ -1,0 +1,12 @@
+{
+  "name": "{{PROJECT_NAME}}-dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceFolder": "/workspace",
+  "remoteUser": "node",
+  "runArgs": [
+    "--network=net-{{PROJECT_NAME}}"
+  ],
+  "postStartCommand": "echo 'Firewall is applied externally by start.sh'"
+}

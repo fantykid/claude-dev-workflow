@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Glob",
+      "Grep",
+      "Bash(pwd)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(chmod:*)",
+      "Bash(cat:*)",
+      "Bash(sed:*)",
+      "Bash(basename:*)",
+      "Bash(echo:*)",
+      "Bash(printenv:*)",
+      "Bash(date:*)"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(rm -r:*)",
+      "Bash(rm -fr:*)",
+      "Bash(rm -rf:*)",
+      "Bash(rm --recursive:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(docker:*)",
+      "Bash(git:*)"
+    ],
+    "additionalDirectories": []
+  }
+}

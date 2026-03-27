@@ -1,0 +1,9 @@
+# Claude Code local settings
+.claude/
+
+# Credentials (never commit)
+*.credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
