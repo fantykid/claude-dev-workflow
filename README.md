@@ -12,35 +12,107 @@ Two AI agents with distinct responsibilities work in separate containers:
 - Linux (tested on Ubuntu)
 - Docker
 - Git
-- Claude Code credentials (`claude login` on host)
+- Claude Code credentials — run `claude login` on host before first use (creates `~/.claude/.credentials.json`)
 
-## Quick Start
+## Quick Start: Create a New Project
 
 ```bash
-# Clone into your projects directory
+# 1. Clone this repo into your projects directory
 cd ~/projects
-git clone https://github.com/<your-username>/claude-dev-workflow.git
+git clone git@github.com:fantykid/claude-dev-workflow.git
 
-# Create a new project (created as sibling directory)
+# 2. Run init (creates project as sibling directory)
 cd claude-dev-workflow
 ./init.sh my-app
 ```
 
-This launches a Bootstrap container where you describe your project idea. Bootstrap auto-determines project type, ports, and services.
+This automatically builds the Bootstrap image (first time only) and launches you into a Bootstrap container.
 
-After Bootstrap exits:
+```bash
+# 3. Inside the Bootstrap container, run the init command:
+/init-project
+
+# Describe your project idea in natural language, e.g.:
+#   "I want to build a blog website"
+#
+# Bootstrap will auto-determine:
+#   - Project type (web app, API, CLI, etc.)
+#   - Ports to expose
+#   - Required services
+#
+# Language/framework is left undecided unless you specify it.
+# Wait for Bootstrap to finish creating all files, then:
+
+exit
+```
+
+```bash
+# 4. Build the dev container image
+cd ~/projects/my-app
+./scripts/build.sh
+
+# 5. Start the container (applies firewall automatically)
+./scripts/start.sh
+
+# 6. Enter the container
+./scripts/enter.sh
+
+# 7. Start developing with Project Claude Code
+claude --dangerously-skip-permissions
+```
+
+Project Claude Code will discuss technical choices with you, set up the project structure, then begin development.
+
+## Daily Development
 
 ```bash
 cd ~/projects/my-app
-./scripts/build.sh                    # Build dev container image
-./scripts/start.sh                    # Start container + firewall
-./scripts/enter.sh                    # Enter container
-claude --dangerously-skip-permissions # Start developing
+./scripts/enter.sh
+claude --dangerously-skip-permissions
+```
+
+## Adjusting Infrastructure (Re-enter Bootstrap)
+
+To modify devcontainer config, ports, services, or other infrastructure after initial setup:
+
+```bash
+cd ~/projects/my-app
+./scripts/bootstrap.sh
+# Make adjustments inside the container, then exit
+
+# Rebuild if Dockerfile was changed
+./scripts/build.sh
+./scripts/start.sh
+```
+
+Bootstrap retains memory from previous sessions.
+
+## Changing Language/Framework
+
+Project Claude Code handles language installation. It will:
+1. Update `repo/.devcontainer/Dockerfile`
+2. Tell you to exit and rebuild
+
+```bash
+exit
+cd ~/projects/my-app
+./scripts/build.sh
+./scripts/start.sh
+./scripts/enter.sh
+claude --dangerously-skip-permissions
+```
+
+## Stopping / Restarting
+
+```bash
+cd ~/projects/my-app
+./scripts/stop.sh     # Stop the container
+./scripts/start.sh    # Restart (re-applies firewall)
 ```
 
 ## Directory Layout
 
-After running `./init.sh my-app`:
+After completing the full setup:
 
 ```
 ~/projects/
@@ -48,73 +120,41 @@ After running `./init.sh my-app`:
 │   ├── init.sh
 │   └── templates/
 └── my-app/                 # Generated project
-    ├── repo/               # Source code (git-versioned)
+    ├── repo/               # Source code (git-versioned, managed by Project CC)
     │   ├── .devcontainer/
     │   ├── src/
     │   └── CLAUDE.md
-    ├── data/               # Persistent data
-    ├── secrets/            # Credentials (read-only in container)
-    ├── scripts/            # Management scripts
-    │   ├── build.sh
-    │   ├── start.sh
-    │   ├── enter.sh
-    │   ├── stop.sh
-    │   └── bootstrap.sh
-    └── project-config.json
+    ├── data/               # Persistent data (survives container restarts)
+    ├── secrets/            # Credentials (mounted read-only in container)
+    ├── scripts/            # Host management scripts
+    │   ├── build.sh        #   Build devcontainer image
+    │   ├── start.sh        #   Start container + firewall
+    │   ├── enter.sh        #   Enter running container
+    │   ├── stop.sh         #   Stop container
+    │   └── bootstrap.sh    #   Re-enter Bootstrap
+    └── project-config.json # Project config (ports, type, services)
 ```
-
-## Management Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/build.sh` | Build the devcontainer image |
-| `scripts/start.sh` | Start container, apply firewall, configure ports |
-| `scripts/stop.sh` | Stop the container |
-| `scripts/enter.sh` | Enter the running container |
-| `scripts/bootstrap.sh` | Re-enter Bootstrap to adjust infrastructure |
 
 ## Security Model
 
 ### Host Protection
 - Host only needs git + Docker installed, nothing else
 - All development happens inside containers
-- No container has access to host filesystem beyond its project directory
+- No container has access to host filesystem beyond its own project directory
 
 ### Container Isolation
-- Each project runs in its own Docker container and network
+- Each project runs in its own Docker container and network (`net-<project-name>`)
 - **Outbound firewall** (default-deny): only allows Claude API, npm registry, GitHub, and a few other whitelisted domains
 - Firewall is applied externally via a one-shot privileged container — the development container has **no** `NET_ADMIN` capability and cannot modify firewall rules
 - Secrets are mounted read-only
 
 ### Bootstrap Confinement
-- Bootstrap can only write to its project directory
-- Management scripts and templates are mounted read-only
+- Bootstrap can only write to its own project directory
+- Management scripts and templates are mounted read-only into the container
 - `settings.json` restricts dangerous operations (no `sudo`, `docker`, `rm -rf`)
-
-## Development Flow
-
-Project Claude Code follows a structured workflow:
-
-1. **Discuss** — Talk with you about requirements, language, and framework
-2. **Scaffold** — Create directory structure, initialize project, commit scaffold
-3. **Develop** — Write code within the established structure
-
-Language and framework installation is handled by Project Claude Code: it updates the Dockerfile, then you rebuild the container.
-
-## Re-entering Bootstrap
-
-To adjust infrastructure after initial setup:
-
-```bash
-cd ~/projects/my-app
-./scripts/bootstrap.sh
-```
-
-Bootstrap retains memory from previous sessions and can modify devcontainer config, ports, services, etc.
 
 ## Notes
 
 - Project names must be lowercase alphanumeric with hyphens (e.g., `my-app`, `api-server`)
 - Projects are created as sibling directories to this repo
-- Git version control inside `repo/` is managed by Project Claude Code
-- Auto backup is currently disabled
+- Git inside `repo/` is managed by Project Claude Code (auto-initializes on first run)
