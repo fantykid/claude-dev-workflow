@@ -126,6 +126,31 @@ docker run -it --rm \
 echo ""
 echo "================================================"
 echo "✓ Bootstrap session ended"
+
+# ============================================================
+# Port 預檢（提前警告，最終檢查由 start.sh 負責）
+# ============================================================
+CONFIG_FILE="${PROJECT_DIR}/project-config.json"
+if [ -f "$CONFIG_FILE" ]; then
+    PORTS=$(tr -d '\n\r\t' < "$CONFIG_FILE" | grep -oP '"ports"\s*:\s*\[\K[^\]]*' 2>/dev/null | tr -d ' "' | tr ',' '\n' || true)
+    PORT_CONFLICTS=""
+    for port in $PORTS; do
+        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
+            if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+                PORT_CONFLICTS="${PORT_CONFLICTS}  - Port ${port} is currently in use\n"
+            fi
+        fi
+    done
+    if [ -n "$PORT_CONFLICTS" ]; then
+        echo ""
+        echo "WARNING: Port conflict detected:"
+        echo -e "$PORT_CONFLICTS"
+        echo "You can edit ${PROJECT_DIR}/project-config.json to change ports"
+        echo "or free up the ports before running start.sh."
+        echo ""
+    fi
+fi
+
 echo ""
 echo "Next steps:"
 echo "  1. cd ${PROJECT_DIR}"
