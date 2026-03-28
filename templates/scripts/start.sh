@@ -17,20 +17,12 @@ fi
 # 從 project-config.json 讀取 port 設定（純資料，非 Bootstrap 產生的代碼）
 # ============================================================
 PORT_ARGS=""
+PORT_ENV=""
 PORT_SUMMARY=""
 # 專案容器可用 port 範圍（避開常見服務 port）
-# 1024-3000:  常見開發工具（webpack 2999, React 3000 等）
-# 3306:       MySQL
-# 5432:       PostgreSQL
-# 5672/5673:  RabbitMQ
-# 6379:       Redis
-# 8080-8090:  常見 HTTP 代理/應用伺服器
-# 8443:       HTTPS 替代
-# 9090:       Prometheus
-# 9200:       Elasticsearch
-# 27017:      MongoDB
 PORT_MIN=10000
 PORT_MAX=19999
+PORT_INDEX=0
 
 CONFIG_FILE="${PROJECT_DIR}/project-config.json"
 if [ -f "$CONFIG_FILE" ]; then
@@ -38,9 +30,8 @@ if [ -f "$CONFIG_FILE" ]; then
     PORTS=$(tr -d '\n\r\t' < "$CONFIG_FILE" | grep -oP '"ports"\s*:\s*\[\K[^\]]*' 2>/dev/null | tr -d ' "' | tr ',' '\n' || true)
     for port in $PORTS; do
         if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
-            # 將設定的 port 映射到安全範圍內
             actual_port=$PORT_MIN
-            # 若 port 被佔用，自動尋找下一個可用 port
+            # 自動尋找可用且不衝突的 port
             while ss -tlnp 2>/dev/null | grep -q ":${actual_port} "; do
                 actual_port=$((actual_port + 1))
                 if [ "$actual_port" -gt "$PORT_MAX" ]; then
@@ -48,10 +39,20 @@ if [ -f "$CONFIG_FILE" ]; then
                     exit 1
                 fi
             done
-            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${port}"
-            PORT_SUMMARY="${PORT_SUMMARY}  - localhost:${actual_port} → container:${port}\n"
+            # 下次從此 port 之後開始找（避免多 port 時分配到同一個）
+            PORT_MIN=$((actual_port + 1))
+            # host 和 container 使用同一個 port（方便本機存取）
+            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${actual_port}"
+            PORT_ENV="${PORT_ENV} -e PORT_${PORT_INDEX}=${actual_port}"
+            PORT_SUMMARY="${PORT_SUMMARY}  - ${actual_port}\n"
+            PORT_INDEX=$((PORT_INDEX + 1))
         fi
     done
+    # 設定主 port 環境變數（容器內 $PORT 即可取得）
+    if [ "$PORT_INDEX" -gt 0 ]; then
+        FIRST_PORT=$(echo -e "$PORT_SUMMARY" | head -1 | tr -d ' -\n')
+        PORT_ENV="${PORT_ENV} -e PORT=${FIRST_PORT}"
+    fi
 fi
 
 # 建立 network（如不存在）
@@ -67,7 +68,7 @@ docker run -d \
     --name "${CONTAINER}" \
     --hostname "${PROJECT_NAME}-dev" \
     --network "net-${PROJECT_NAME}" \
-    ${PORT_ARGS} \
+    ${PORT_ARGS} ${PORT_ENV} \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
