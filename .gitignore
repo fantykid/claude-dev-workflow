@@ -3,6 +3,22 @@
 
 # Credentials (never commit)
 *.credentials.json
+secrets/
+
+# Private keys
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
 
 # OS
 .DS_Store
