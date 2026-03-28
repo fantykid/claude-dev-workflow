@@ -138,14 +138,15 @@ if [ -f "$CONFIG_FILE" ]; then
     for port in $PORTS; do
         if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
             if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
-                PORT_CONFLICTS="${PORT_CONFLICTS}  - Port ${port} is currently in use\n"
+                PORT_CONFLICTS="${PORT_CONFLICTS}  - Port ${port} is currently in use
+"
             fi
         fi
     done
     if [ -n "$PORT_CONFLICTS" ]; then
         echo ""
         echo "WARNING: Port conflict detected:"
-        echo -e "$PORT_CONFLICTS"
+        printf '%s' "$PORT_CONFLICTS"
         echo "start.sh will automatically find available ports."
         echo "Or edit ${PROJECT_DIR}/project-config.json to change manually."
         echo ""
