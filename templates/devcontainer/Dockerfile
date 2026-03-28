@@ -35,6 +35,11 @@ RUN curl -fsSL https://bun.sh/install | bash
 
 ENV PATH=$PATH:/home/node/.bun/bin
 
+# 安裝 Playwright 系統依賴（Chromium 需要的 shared libraries）
+USER root
+RUN npx playwright install-deps chromium
+USER node
+
 # 安裝 gstack
 RUN git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git /home/node/.claude/skills/gstack && \
     cd /home/node/.claude/skills/gstack && \
