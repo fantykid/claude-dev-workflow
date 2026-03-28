@@ -146,8 +146,8 @@ if [ -f "$CONFIG_FILE" ]; then
         echo ""
         echo "WARNING: Port conflict detected:"
         echo -e "$PORT_CONFLICTS"
-        echo "You can edit ${PROJECT_DIR}/project-config.json to change ports"
-        echo "or free up the ports before running start.sh."
+        echo "start.sh will automatically find available ports."
+        echo "Or edit ${PROJECT_DIR}/project-config.json to change manually."
         echo ""
     fi
 fi

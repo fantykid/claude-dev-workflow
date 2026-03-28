@@ -17,18 +17,27 @@ fi
 # 從 project-config.json 讀取 port 設定（純資料，非 Bootstrap 產生的代碼）
 # ============================================================
 PORT_ARGS=""
+PORT_SUMMARY=""
 CONFIG_FILE="${PROJECT_DIR}/project-config.json"
 if [ -f "$CONFIG_FILE" ]; then
     # 壓成單行後解析，避免多行 JSON 導致 grep 失敗
     PORTS=$(tr -d '\n\r\t' < "$CONFIG_FILE" | grep -oP '"ports"\s*:\s*\[\K[^\]]*' 2>/dev/null | tr -d ' "' | tr ',' '\n' || true)
     for port in $PORTS; do
         if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
-            # 檢查 port 衝突
-            if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
-                echo "ERROR: Port ${port} is already in use"
-                exit 1
+            actual_port="$port"
+            # 若 port 被佔用，自動尋找下一個可用 port
+            while ss -tlnp 2>/dev/null | grep -q ":${actual_port} "; do
+                if [ "$actual_port" -ge 65535 ]; then
+                    echo "ERROR: No available port found starting from ${port}"
+                    exit 1
+                fi
+                actual_port=$((actual_port + 1))
+            done
+            if [ "$actual_port" != "$port" ]; then
+                echo "Port ${port} in use → using ${actual_port} instead"
             fi
-            PORT_ARGS="${PORT_ARGS} -p ${port}:${port}"
+            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${actual_port}"
+            PORT_SUMMARY="${PORT_SUMMARY}  - ${actual_port}$([ "$actual_port" != "$port" ] && echo " (configured: ${port})" || true)\n"
         elif [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -lt 1024 ]; then
             echo "WARNING: Ignoring privileged port ${port} (only ports 1024-65535 allowed)"
         fi
@@ -78,7 +87,10 @@ echo ""
 echo "✓ Container started: ${CONTAINER}"
 echo "✓ Network: net-${PROJECT_NAME}"
 echo "✓ Firewall active (externally applied, tamper-proof)"
-echo "✓ Hourly backup enabled"
+if [ -n "$PORT_SUMMARY" ]; then
+    echo "✓ Ports:"
+    echo -e "$PORT_SUMMARY"
+fi
 echo ""
 echo "Next: ./scripts/enter.sh"
 echo "Then: claude --dangerously-skip-permissions"
