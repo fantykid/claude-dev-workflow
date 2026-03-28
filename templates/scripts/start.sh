@@ -18,28 +18,38 @@ fi
 # ============================================================
 PORT_ARGS=""
 PORT_SUMMARY=""
+# 專案容器可用 port 範圍（避開常見服務 port）
+# 1024-3000:  常見開發工具（webpack 2999, React 3000 等）
+# 3306:       MySQL
+# 5432:       PostgreSQL
+# 5672/5673:  RabbitMQ
+# 6379:       Redis
+# 8080-8090:  常見 HTTP 代理/應用伺服器
+# 8443:       HTTPS 替代
+# 9090:       Prometheus
+# 9200:       Elasticsearch
+# 27017:      MongoDB
+PORT_MIN=10000
+PORT_MAX=19999
+
 CONFIG_FILE="${PROJECT_DIR}/project-config.json"
 if [ -f "$CONFIG_FILE" ]; then
     # 壓成單行後解析，避免多行 JSON 導致 grep 失敗
     PORTS=$(tr -d '\n\r\t' < "$CONFIG_FILE" | grep -oP '"ports"\s*:\s*\[\K[^\]]*' 2>/dev/null | tr -d ' "' | tr ',' '\n' || true)
     for port in $PORTS; do
-        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
-            actual_port="$port"
+        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; then
+            # 將設定的 port 映射到安全範圍內
+            actual_port=$PORT_MIN
             # 若 port 被佔用，自動尋找下一個可用 port
             while ss -tlnp 2>/dev/null | grep -q ":${actual_port} "; do
-                if [ "$actual_port" -ge 65535 ]; then
-                    echo "ERROR: No available port found starting from ${port}"
+                actual_port=$((actual_port + 1))
+                if [ "$actual_port" -gt "$PORT_MAX" ]; then
+                    echo "ERROR: No available port in range ${PORT_MIN}-${PORT_MAX}"
                     exit 1
                 fi
-                actual_port=$((actual_port + 1))
             done
-            if [ "$actual_port" != "$port" ]; then
-                echo "Port ${port} in use → using ${actual_port} instead"
-            fi
-            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${actual_port}"
-            PORT_SUMMARY="${PORT_SUMMARY}  - ${actual_port}$([ "$actual_port" != "$port" ] && echo " (configured: ${port})" || true)\n"
-        elif [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -lt 1024 ]; then
-            echo "WARNING: Ignoring privileged port ${port} (only ports 1024-65535 allowed)"
+            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${port}"
+            PORT_SUMMARY="${PORT_SUMMARY}  - localhost:${actual_port} → container:${port}\n"
         fi
     done
 fi
