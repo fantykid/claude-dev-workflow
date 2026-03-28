@@ -119,6 +119,7 @@ docker run -it --rm \
     -v "${TEMPLATE_SRC}:/workspace/templates:ro" \
     -v "${PROJECT_DIR}/secrets:/workspace/secrets:ro" \
     -v "${PROJECT_DIR}/.claude/settings.json:/workspace/.claude/settings.json:ro" \
+    -v "${PROJECT_DIR}/.claude/settings.json:/home/node/.claude/settings.json:ro" \
     -v "${PROJECT_DIR}/.claude/commands:/workspace/.claude/commands:ro" \
     -w /workspace \
     "$BOOTSTRAP_IMAGE"
