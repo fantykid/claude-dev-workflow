@@ -11,6 +11,7 @@
       "Bash(ls:*)",
       "Bash(find:*)",
       "Bash(mkdir:*)",
+      "Bash(mkdir -p:*)",
       "Bash(cp:*)",
       "Bash(chmod:*)",
       "Bash(cat:*)",
