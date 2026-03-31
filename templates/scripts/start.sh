@@ -156,9 +156,11 @@ if [ "$MCP_SEARCH" = "true" ]; then
             # 寫入 .mcp.json（Claude Code 自動讀取此檔案載入 MCP 工具）
             docker exec "${CONTAINER}" sh -c "cat > /workspace/.mcp.json << MCPEOF
 {
-  \"search\": {
-    \"type\": \"http\",
-    \"url\": \"http://${MCP_HOST_IP}:${MCP_PORT}/mcp\"
+  \"mcpServers\": {
+    \"search\": {
+      \"type\": \"http\",
+      \"url\": \"http://${MCP_HOST_IP}:${MCP_PORT}/mcp\"
+    }
   }
 }
 MCPEOF"
