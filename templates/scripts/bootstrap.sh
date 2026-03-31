@@ -42,6 +42,7 @@ echo ""
 # scripts/ 以 :ro 掛載，Bootstrap 無法修改
 # templates/ 從 repo 掛載為 :ro（模板不在專案內）
 # settings.json commands/ 以 :ro 個別掛載，保護權限設定
+cp "${CRED_FILE}" "${PROJECT_DIR}/.bootstrap-claude/.credentials.json"
 docker rm -f "bootstrap-${PROJECT_NAME}" 2>/dev/null || true
 docker run -it --rm \
     --name "bootstrap-${PROJECT_NAME}" \
@@ -50,7 +51,6 @@ docker run -it --rm \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
-    -v "${CRED_FILE}:/home/node/.claude/.credentials.json" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \
     -v "${REPO_DIR}/templates:/workspace/templates:ro" \
     -v "${PROJECT_DIR}/secrets:/workspace/secrets:ro" \

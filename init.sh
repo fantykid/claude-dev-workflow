@@ -104,8 +104,9 @@ echo ""
 # - scripts/ 以 :ro 覆蓋掛載（Bootstrap 無法修改）
 # - templates/ 從 repo 掛載為 :ro（不再複製到專案內）
 # - settings.json 和 commands/ 以 :ro 個別掛載（保護權限設定，不阻擋 .claude/ 其餘寫入）
-# - credentials.json 唯讀掛載
+# - credentials.json 複製進 .bootstrap-claude（避免巢狀掛載問題）
 # - PROJECT_NAME 和 HOST_PROJECT_DIR 透過環境變數傳入
+cp "${CRED_FILE}" "${PROJECT_DIR}/.bootstrap-claude/.credentials.json"
 docker rm -f "bootstrap-${PROJECT_NAME}" 2>/dev/null || true
 docker run -it --rm \
     --name "bootstrap-${PROJECT_NAME}" \
@@ -114,7 +115,6 @@ docker run -it --rm \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
-    -v "${CRED_FILE}:/home/node/.claude/.credentials.json" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \
     -v "${TEMPLATE_SRC}:/workspace/templates:ro" \
     -v "${PROJECT_DIR}/secrets:/workspace/secrets:ro" \
