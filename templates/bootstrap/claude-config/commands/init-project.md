@@ -24,6 +24,7 @@
 - **專案類型**：web app / API / CLI tool / automation / AI-ML / mobile / experimental
 - **需要的外部服務**：根據描述推斷（例如「存用戶資料」→ 可能需要 PostgreSQL）
 - **Port**：根據專案類型自動分配常見 port（如 web app → 3000，API → 8080）。若不需要暴露 port 則留空。
+- **搜尋能力**：若專案可能需要查詢網路資料（技術文件、API 文檔、錯誤排查等），設 `mcp_search` 為 `true`。大多數開發專案建議啟用。
 
 **語言和框架暫不決定**——除非使用者在描述中明確指定（如「用 Python 做...」），否則留待進入開發容器後由 Project Claude Code 與使用者討論決定。
 
@@ -47,14 +48,16 @@ mkdir -p repo/.devcontainer repo/src
   "language": "undecided",
   "framework": "undecided",
   "ports": [3000],
-  "services": []
+  "services": [],
+  "mcp_search": true
 }
 ```
 
 - `language` / `framework`：若使用者未指定，填 `"undecided"`
 - `ports`：你根據專案類型自動分配的 port，無需暴露則為 `[]`
 - `services`：你推斷需要的外部服務，無則為 `[]`
-- host 的 start.sh 會在 runtime 讀取此檔案來設定 port 映射
+- `mcp_search`：是否啟用網路搜尋能力（透過 MCP Search Server），`true` 或 `false`
+- host 的 start.sh 會在 runtime 讀取此檔案來設定 port 映射和 MCP 連線
 
 ### 5. 客製化並寫入 Devcontainer 檔案
 

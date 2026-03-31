@@ -111,16 +111,59 @@ fi
 # ============================================================
 echo "Initializing firewall via external container..."
 if ! docker run --rm \
+    --user root \
     --cap-drop=ALL \
     --cap-add=NET_ADMIN \
     --cap-add=NET_RAW \
     --network "container:${CONTAINER}" \
     "${IMAGE}" \
-    sudo /usr/local/bin/init-firewall.sh; then
+    /usr/local/bin/init-firewall.sh; then
     echo "ERROR: Firewall initialization failed."
     echo "Stopping container for safety — do not use without firewall."
     docker stop "${CONTAINER}" 2>/dev/null || true
     exit 1
+fi
+
+# ============================================================
+# MCP Search Server 連線設定
+# ============================================================
+MCP_SEARCH="false"
+if [ -f "$CONFIG_FILE" ]; then
+    MCP_SEARCH=$(jq -r '.mcp_search // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+fi
+
+if [ "$MCP_SEARCH" = "true" ]; then
+    MCP_PORT="${MCP_SEARCH_PORT:-9100}"
+    if ! docker ps -q -f "name=claude-mcp-search" | grep -q .; then
+        echo ""
+        echo "WARNING: MCP Search Server (claude-mcp-search) is not running."
+        echo "Search capability will not be available."
+        echo "Start it with: docker run -d --name claude-mcp-search -p ${MCP_PORT}:9100 claude-mcp-search:latest"
+    else
+        # 取得 host IP（容器透過此 IP 連到 MCP Server）
+        MCP_HOST_IP=$(docker exec "${CONTAINER}" sh -c "ip route | grep default | cut -d' ' -f3")
+        if [ -n "$MCP_HOST_IP" ]; then
+            # 寫入 .mcp.json（Claude Code 自動讀取此檔案載入 MCP 工具）
+            docker exec "${CONTAINER}" sh -c "cat > /workspace/.mcp.json << MCPEOF
+{
+  \"search\": {
+    \"type\": \"http\",
+    \"url\": \"http://${MCP_HOST_IP}:${MCP_PORT}/mcp\"
+  }
+}
+MCPEOF"
+            # 驗證 MCP Server 可達（從容器內部測試）
+            if docker exec "${CONTAINER}" sh -c "curl -sf --connect-timeout 3 http://${MCP_HOST_IP}:${MCP_PORT}/health >/dev/null 2>&1"; then
+                MCP_CONFIGURED="true"
+            else
+                echo "WARNING: MCP Search Server is running but not reachable at http://${MCP_HOST_IP}:${MCP_PORT}"
+                echo "Check: port binding, firewall rules, or MCP server logs."
+                docker exec "${CONTAINER}" rm -f /workspace/.mcp.json
+            fi
+        else
+            echo "WARNING: Could not detect host IP for MCP connection."
+        fi
+    fi
 fi
 
 echo ""
@@ -130,6 +173,9 @@ echo "✓ Firewall active (externally applied, tamper-proof)"
 if [ -n "$PORT_SUMMARY" ]; then
     echo "✓ Ports:"
     printf '%s' "$PORT_SUMMARY"
+fi
+if [ "${MCP_CONFIGURED:-}" = "true" ]; then
+    echo "✓ MCP Search enabled (http://${MCP_HOST_IP}:${MCP_PORT})"
 fi
 echo ""
 echo "Next: ./scripts/enter.sh"

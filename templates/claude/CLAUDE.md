@@ -9,6 +9,10 @@
 - 密鑰：/secrets（唯讀，從中讀取 API key 等）
 - 使用者：node（防火牆腳本有限 sudo 權限）
 - 網路：出站受防火牆限制，僅允許 Claude API/npm/GitHub 等白名單域名
+- 搜尋：若專案啟用了 MCP Search（見 project-config.json 的 `mcp_search` 欄位），可使用以下 MCP 工具（容器本身不直接連網，搜尋透過 host 上的 MCP Search Server 代理）：
+  - `mcp__search__web_search` — 網頁搜尋（輸入關鍵字，回傳搜尋結果列表）
+  - `mcp__search__web_fetch` — 抓取網頁內容（輸入 URL，回傳文字內容，上限 100KB）
+  - `mcp__search__web_download` — 下載檔案（輸入 URL + encoding text/base64，回傳檔案內容，上限 10MB）
 - 容器內已有：Node.js 20、git、基本開發工具
 
 ## 首次啟動
