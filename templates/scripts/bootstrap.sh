@@ -4,11 +4,18 @@ PROJECT_NAME="{{PROJECT_NAME}}"
 PROJECT_DIR="{{PROJECT_DIR}}"
 REPO_DIR="{{REPO_DIR}}"
 
-# 確認 credentials 存在
-CRED_FILE="${HOME}/.claude/.credentials.json"
-if [ ! -f "$CRED_FILE" ]; then
-    echo "Error: Claude credentials not found at $CRED_FILE"
+# 確認 OAuth token 存在
+TOKEN_FILE="${HOME}/.claude/.oauth-token"
+if [ ! -f "$TOKEN_FILE" ]; then
+    echo "Error: Claude OAuth token not found at $TOKEN_FILE"
+    echo "Run 'claude setup-token' on host first, then save the token:"
+    echo "  echo 'YOUR_TOKEN' > ~/.claude/.oauth-token && chmod 600 ~/.claude/.oauth-token"
     exit 1
+fi
+TOKEN_PERMS=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null)
+if [ "$TOKEN_PERMS" != "600" ]; then
+    echo "WARNING: Token file permissions are $TOKEN_PERMS (should be 600)"
+    echo "Fix with: chmod 600 $TOKEN_FILE"
 fi
 
 # 確認 Bootstrap memory 目錄存在
@@ -42,13 +49,14 @@ echo ""
 # scripts/ 以 :ro 掛載，Bootstrap 無法修改
 # templates/ 從 repo 掛載為 :ro（模板不在專案內）
 # settings.json commands/ 以 :ro 個別掛載，保護權限設定
-cp "${CRED_FILE}" "${PROJECT_DIR}/.bootstrap-claude/.credentials.json"
+CLAUDE_TOKEN=$(cat "$TOKEN_FILE")
 docker rm -f "bootstrap-${PROJECT_NAME}" 2>/dev/null || true
 docker run -it --rm \
     --name "bootstrap-${PROJECT_NAME}" \
     --hostname "bootstrap" \
     -e "PROJECT_NAME=${PROJECT_NAME}" \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
+    -e "ANTHROPIC_API_KEY=${CLAUDE_TOKEN}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \

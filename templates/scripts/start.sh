@@ -5,12 +5,18 @@ PROJECT_DIR="{{PROJECT_DIR}}"
 CONTAINER="devcontainer-${PROJECT_NAME}"
 IMAGE="devcontainer-${PROJECT_NAME}:latest"
 
-# 確認 credentials 存在
-CRED_FILE="${HOME}/.claude/.credentials.json"
-if [ ! -f "$CRED_FILE" ]; then
-    echo "Error: Claude credentials not found at $CRED_FILE"
-    echo "Run 'claude login' on host first."
+# 確認 OAuth token 存在
+TOKEN_FILE="${HOME}/.claude/.oauth-token"
+if [ ! -f "$TOKEN_FILE" ]; then
+    echo "Error: Claude OAuth token not found at $TOKEN_FILE"
+    echo "Run 'claude setup-token' on host first, then save the token:"
+    echo "  echo 'YOUR_TOKEN' > ~/.claude/.oauth-token && chmod 600 ~/.claude/.oauth-token"
     exit 1
+fi
+TOKEN_PERMS=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null)
+if [ "$TOKEN_PERMS" != "600" ]; then
+    echo "WARNING: Token file permissions are $TOKEN_PERMS (should be 600)"
+    echo "Fix with: chmod 600 $TOKEN_FILE"
 fi
 
 # 確認 jq 存在（host 上需要安裝，用於安全解析 JSON）
@@ -78,6 +84,7 @@ docker rm -f "${CONTAINER}" 2>/dev/null || true
 # ============================================================
 # 啟動容器（不授予 NET_ADMIN — 防火牆由外部套用，容器內無法關閉）
 # ============================================================
+CLAUDE_TOKEN=$(cat "$TOKEN_FILE")
 docker run -d \
     --name "${CONTAINER}" \
     --hostname "${PROJECT_NAME}-dev" \
@@ -89,7 +96,7 @@ docker run -d \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
-    -v "${CRED_FILE}:/home/node/.claude/.credentials.json" \
+    -e "ANTHROPIC_API_KEY=${CLAUDE_TOKEN}" \
     "${IMAGE}" \
     sleep infinity
 
@@ -104,6 +111,9 @@ if [ "$CONTAINER_STATE" != "true" ]; then
     docker rm -f "${CONTAINER}" 2>/dev/null || true
     exit 1
 fi
+
+# 寫入 user-level settings（apiKeyHelper 讓 Claude Code 免登入）
+docker exec "${CONTAINER}" sh -c 'mkdir -p /home/node/.claude && echo "{\"apiKeyHelper\":\"echo \$ANTHROPIC_API_KEY\",\"model\":\"opus\"}" > /home/node/.claude/settings.json'
 
 # ============================================================
 # 透過外部一次性容器套用防火牆（共享 network namespace）
