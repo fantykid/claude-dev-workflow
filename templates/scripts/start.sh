@@ -89,7 +89,7 @@ docker run -d \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
-    -v "${CRED_FILE}:/home/node/.claude/.credentials.json:ro" \
+    -v "${CRED_FILE}:/home/node/.claude/.credentials.json" \
     "${IMAGE}" \
     sleep infinity
 
