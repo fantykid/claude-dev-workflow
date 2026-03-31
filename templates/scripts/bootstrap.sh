@@ -56,7 +56,7 @@ docker run -it --rm \
     --hostname "bootstrap" \
     -e "PROJECT_NAME=${PROJECT_NAME}" \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
-    -e "ANTHROPIC_API_KEY=${CLAUDE_TOKEN}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_TOKEN}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \

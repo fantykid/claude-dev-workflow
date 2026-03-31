@@ -96,7 +96,7 @@ docker run -d \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
-    -e "ANTHROPIC_API_KEY=${CLAUDE_TOKEN}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_TOKEN}" \
     "${IMAGE}" \
     sleep infinity
 
@@ -112,8 +112,8 @@ if [ "$CONTAINER_STATE" != "true" ]; then
     exit 1
 fi
 
-# 寫入 user-level settings（apiKeyHelper 讓 Claude Code 免登入）
-docker exec "${CONTAINER}" sh -c 'mkdir -p /home/node/.claude && echo "{\"apiKeyHelper\":\"echo \$ANTHROPIC_API_KEY\",\"model\":\"opus\"}" > /home/node/.claude/settings.json'
+# 寫入 user-level settings（預設 Opus 模型）
+docker exec "${CONTAINER}" sh -c 'mkdir -p /home/node/.claude && echo "{\"model\":\"opus\"}" > /home/node/.claude/settings.json'
 
 # ============================================================
 # 透過外部一次性容器套用防火牆（共享 network namespace）

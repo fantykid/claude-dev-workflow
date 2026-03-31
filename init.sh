@@ -110,7 +110,7 @@ echo ""
 # - scripts/ 以 :ro 覆蓋掛載（Bootstrap 無法修改）
 # - templates/ 從 repo 掛載為 :ro（不再複製到專案內）
 # - settings.json 和 commands/ 以 :ro 個別掛載（保護權限設定，不阻擋 .claude/ 其餘寫入）
-# - ANTHROPIC_API_KEY 環境變數傳入（免登入）
+# - CLAUDE_CODE_OAUTH_TOKEN 環境變數傳入（-p 模式自動化可用）
 # - PROJECT_NAME 和 HOST_PROJECT_DIR 透過環境變數傳入
 CLAUDE_TOKEN=$(cat "$TOKEN_FILE")
 docker rm -f "bootstrap-${PROJECT_NAME}" 2>/dev/null || true
@@ -119,7 +119,7 @@ docker run -it --rm \
     --hostname "bootstrap" \
     -e "PROJECT_NAME=${PROJECT_NAME}" \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
-    -e "ANTHROPIC_API_KEY=${CLAUDE_TOKEN}" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_TOKEN}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \
