@@ -114,7 +114,7 @@ docker run -it --rm \
     -e "HOST_PROJECT_DIR=${PROJECT_DIR}" \
     -v "${PROJECT_DIR}:/workspace" \
     -v "${PROJECT_DIR}/.bootstrap-claude:/home/node/.claude" \
-    -v "${CRED_FILE}:/home/node/.claude/.credentials.json:ro" \
+    -v "${CRED_FILE}:/home/node/.claude/.credentials.json" \
     -v "${PROJECT_DIR}/scripts:/workspace/scripts:ro" \
     -v "${TEMPLATE_SRC}:/workspace/templates:ro" \
     -v "${PROJECT_DIR}/secrets:/workspace/secrets:ro" \
