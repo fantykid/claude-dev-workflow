@@ -15,8 +15,9 @@ if [ ! -f "$TOKEN_FILE" ]; then
 fi
 TOKEN_PERMS=$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null)
 if [ "$TOKEN_PERMS" != "600" ]; then
-    echo "WARNING: Token file permissions are $TOKEN_PERMS (should be 600)"
+    echo "Error: Token file permissions are $TOKEN_PERMS (must be 600)"
     echo "Fix with: chmod 600 $TOKEN_FILE"
+    exit 1
 fi
 
 # 確認 jq 存在（host 上需要安裝，用於安全解析 JSON）
@@ -81,10 +82,57 @@ docker network create "net-${PROJECT_NAME}" 2>/dev/null || true
 # 移除舊容器（如存在）
 docker rm -f "${CONTAINER}" 2>/dev/null || true
 
+# 容器使用者（預設 node，可在 project-config.json 中覆寫）
+CONTAINER_USER="node"
+if [ -f "$CONFIG_FILE" ]; then
+    _user=$(jq -r '.container_user // empty' "$CONFIG_FILE" 2>/dev/null || true)
+    [ -n "$_user" ] && CONTAINER_USER="$_user"
+fi
+CONTAINER_HOME="/home/${CONTAINER_USER}"
+
+# ============================================================
+# 準備 Claude Code 持久化目錄（session + 登入狀態，每個專案必備）
+# ============================================================
+mkdir -p -m 700 "${PROJECT_DIR}/claude-data"
+if [ ! -f "${PROJECT_DIR}/claude-data/settings.json" ]; then
+    echo '{"model":"opus"}' > "${PROJECT_DIR}/claude-data/settings.json"
+fi
+
+# gstack 持久化（僅在啟用 gstack 時）
+GSTACK_ENABLED="false"
+if [ -f "$CONFIG_FILE" ]; then
+    GSTACK_ENABLED=$(jq -r '.gstack // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+fi
+GSTACK_MOUNT=""
+if [ "$GSTACK_ENABLED" = "true" ]; then
+    mkdir -p -m 700 "${PROJECT_DIR}/gstack-data"
+    GSTACK_MOUNT="-v ${PROJECT_DIR}/gstack-data:${CONTAINER_HOME}/.gstack"
+fi
+
+# GPU 支援（需要 host 已安裝 nvidia-container-toolkit）
+GPU_FLAG=""
+GPU_ENABLED="false"
+if [ -f "$CONFIG_FILE" ]; then
+    GPU_ENABLED=$(jq -r '.gpu // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+fi
+if [ "$GPU_ENABLED" = "true" ]; then
+    if command -v nvidia-smi &>/dev/null; then
+        GPU_FLAG="--gpus all"
+        echo "GPU support enabled."
+    else
+        echo "WARNING: gpu=true in config but nvidia-smi not found on host. Skipping GPU."
+    fi
+fi
+
+# ============================================================
+# 準備 OAuth token（檔案掛載，不暴露在環境變數）
+# ============================================================
+cp "$TOKEN_FILE" "${PROJECT_DIR}/claude-data/.oauth-token"
+chmod 600 "${PROJECT_DIR}/claude-data/.oauth-token"
+
 # ============================================================
 # 啟動容器（不授予 NET_ADMIN — 防火牆由外部套用，容器內無法關閉）
 # ============================================================
-CLAUDE_TOKEN=$(cat "$TOKEN_FILE")
 docker run -d \
     --name "${CONTAINER}" \
     --hostname "${PROJECT_NAME}-dev" \
@@ -92,11 +140,13 @@ docker run -d \
     --cap-drop=ALL \
     --security-opt no-new-privileges \
     --restart no \
+    ${GPU_FLAG} \
     ${PORT_ARGS} ${PORT_ENV} \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
-    -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_TOKEN}" \
+    -v "${PROJECT_DIR}/claude-data:${CONTAINER_HOME}/.claude" \
+    ${GSTACK_MOUNT} \
     "${IMAGE}" \
     sleep infinity
 
@@ -112,8 +162,9 @@ if [ "$CONTAINER_STATE" != "true" ]; then
     exit 1
 fi
 
-# 寫入 user-level settings（預設 Opus 模型）
-docker exec "${CONTAINER}" sh -c 'mkdir -p /home/node/.claude && echo "{\"model\":\"opus\"}" > /home/node/.claude/settings.json'
+# 設定 token 環境變數載入（透過 profile.d，不暴露在 docker inspect）
+docker exec -u root "${CONTAINER}" sh -c \
+    "echo 'export CLAUDE_CODE_OAUTH_TOKEN=\$(cat ${CONTAINER_HOME}/.claude/.oauth-token 2>/dev/null)' > /etc/profile.d/claude-token.sh && chmod 644 /etc/profile.d/claude-token.sh"
 
 # ============================================================
 # 透過外部一次性容器套用防火牆（共享 network namespace）

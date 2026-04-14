@@ -51,12 +51,12 @@ iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
-# Create ipset with CIDR support
-ipset create allowed-domains hash:net
+# Create ipset with CIDR support and entry timeout (3600s = 1hr)
+ipset create allowed-domains hash:net timeout 3600
 
 # Fetch GitHub meta information and aggregate + add their IP ranges
 echo "Fetching GitHub IP ranges..."
-gh_ranges=$(curl -s https://api.github.com/meta)
+gh_ranges=$(curl -sf --connect-timeout 10 https://api.github.com/meta)
 if [ -z "$gh_ranges" ]; then
     echo "ERROR: Failed to fetch GitHub IP ranges"
     exit 1
@@ -74,7 +74,7 @@ while read -r cidr; do
         exit 1
     fi
     echo "Adding GitHub range $cidr"
-    ipset add allowed-domains "$cidr"
+    ipset add allowed-domains "$cidr" timeout 0
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | (aggregate -q 2>/dev/null || sort -u))
 
 # Resolve and add other allowed domains
@@ -100,7 +100,7 @@ for domain in \
             exit 1
         fi
         echo "Adding $ip for $domain"
-        ipset add allowed-domains "$ip"
+        ipset add allowed-domains "$ip" timeout 0
     done < <(echo "$ips")
 done
 
@@ -132,6 +132,19 @@ iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+
+# ============================================================
+# IPv6 防火牆（全面封鎖 — 只允許 loopback）
+# ============================================================
+echo "Configuring IPv6 firewall..."
+ip6tables -F 2>/dev/null || true
+ip6tables -X 2>/dev/null || true
+ip6tables -A INPUT -i lo -j ACCEPT
+ip6tables -A OUTPUT -o lo -j ACCEPT
+ip6tables -P INPUT DROP
+ip6tables -P FORWARD DROP
+ip6tables -P OUTPUT DROP
+echo "IPv6 firewall: all non-loopback traffic blocked"
 
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."
