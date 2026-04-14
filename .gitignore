@@ -1,8 +1,23 @@
-# Claude Code local settings
-.claude/
+# ============================================================
+# Claude Dev Workflow — .gitignore
+# 此專案公開於 GitHub，所有敏感資料必須嚴格排除
+# ============================================================
 
-# Credentials (never commit)
+# Claude Code local settings（含 session、memory、credentials）
+.claude/
+.bootstrap-claude/
+claude-data/
+
+# OAuth / API tokens（任何形式）
+.oauth-token
+*.oauth-token
+*.token
+**/oauth-token
+
+# Credentials（任何格式）
 *.credentials.json
+*.credentials
+credentials.json
 secrets/
 
 # Private keys
@@ -10,16 +25,58 @@ secrets/
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
 id_rsa
 id_ed25519
+id_dsa
+id_ecdsa
+*.pub
 
 # Environment variables
 .env
 .env.*
+.env.local
+.env.production
+.env.staging
+
+# Generated project directories（init.sh 建立的專案是 sibling，但以防萬一）
+project-config.json
+bootstrap-manifest.md
+data/
+gstack-data/
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.tar
+*.tar.gz
+*.zip
 
 # Logs
 *.log
+npm-debug.log*
 
 # OS
 .DS_Store
 Thumbs.db
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
