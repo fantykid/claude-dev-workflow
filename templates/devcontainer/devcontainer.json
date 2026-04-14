@@ -4,7 +4,7 @@
     "dockerfile": "Dockerfile"
   },
   "workspaceFolder": "/workspace",
-  "remoteUser": "node",
+  "remoteUser": "{{CONTAINER_USER}}",
   "runArgs": [
     "--network=net-{{PROJECT_NAME}}"
   ],

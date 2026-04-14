@@ -6,7 +6,7 @@ ARG CLAUDE_CODE_VERSION=latest
 RUN apt-get update && apt-get install -y --no-install-recommends \
     less git procps sudo fzf zsh man-db gnupg2 gh \
     iptables ipset iproute2 dnsutils jq \
-    nano vim curl \
+    nano vim curl tmux \
     && (apt-get install -y --no-install-recommends aggregate || echo "WARN: aggregate not available") \
     && rm -rf /var/lib/apt/lists/*
 
@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # {{ADDITIONAL_PACKAGES}}
 
 # npm global 路徑（對齊官方）
-RUN mkdir -p /usr/local/share/npm-global && \
+RUN mkdir -p /usr/local/share/npm-global/lib && \
     chown -R node:node /usr/local/share/npm-global
 
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
@@ -25,25 +25,23 @@ ENV DEVCONTAINER=true
 RUN mkdir -p /workspace /home/node/.claude && \
     chown -R node:node /workspace /home/node/.claude
 
+# tmux 預設設定（滑鼠支援 + 基本配置）
+RUN echo 'set -g mouse on' > /home/node/.tmux.conf && \
+    chown node:node /home/node/.tmux.conf
+
 USER node
+
+# === Bootstrap 會根據是否啟用 gstack 在此加入 Bun + Playwright ===
+# {{GSTACK_DEPS}}
+
+# ── 以下每次 build 都重新執行（拉最新版）──
+ARG CACHEBUST_TOOLS=0
 
 # 安裝 Claude Code（對齊官方）
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-# 安裝 Bun（gstack 依賴）
-RUN curl -fsSL https://bun.sh/install | bash
-
-ENV PATH=$PATH:/home/node/.bun/bin
-
-# 安裝 Playwright 系統依賴（Chromium 需要的 shared libraries）
-USER root
-RUN npx playwright install-deps chromium
-USER node
-
-# 安裝 gstack
-RUN git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git /home/node/.claude/skills/gstack && \
-    cd /home/node/.claude/skills/gstack && \
-    ./setup
+# === Bootstrap 會根據是否啟用 gstack 在此加入 gstack 安裝 ===
+# {{GSTACK_INSTALL}}
 
 # 防火牆腳本 + 最小 sudo 權限（對齊官方）
 USER root
