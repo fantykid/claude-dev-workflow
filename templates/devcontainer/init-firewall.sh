@@ -100,7 +100,7 @@ for domain in \
             exit 1
         fi
         echo "Adding $ip for $domain"
-        ipset add allowed-domains "$ip" timeout 0
+        ipset add allowed-domains "$ip" timeout 0 2>/dev/null || true
     done < <(echo "$ips")
 done
 
