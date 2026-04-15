@@ -35,7 +35,7 @@
 
 ### 3. 建立目錄結構
 ```bash
-mkdir -p repo/.devcontainer repo/src
+mkdir -p repo/.devcontainer repo/src repo/.claude/skills repo/.claude/rules
 ```
 （data/ 和 secrets/ 已由 init.sh 建立）
 
@@ -131,6 +131,23 @@ mkdir -p repo/.devcontainer repo/src
 
 讀取 templates/claude/CLAUDE.md，替換 `{{PROJECT_DESCRIPTION}}` 為使用者的專案描述和你的判斷結果（類型、服務、port 等）。
 寫入 repo/CLAUDE.md。
+
+### 6.5. 建立自我管理檔案
+
+Project Claude Code 需要跨 session 的持久化機制來追蹤目標、記錄決策、建立可重用工具。
+
+**Rules（每次 session 自動載入）**：
+- 讀取 `templates/claude/rules/project-goals.md`，將 `{{PROJECT_GOALS}}` 替換為使用者的專案描述和你判斷的核心目標（一段簡潔的文字），寫入 `repo/.claude/rules/project-goals.md`
+- 複製 `templates/claude/rules/decisions.md` 到 `repo/.claude/rules/decisions.md`
+
+**Skills（CC 可自動辨識並使用的工作流程）**：
+- 複製 `templates/claude/skills/review-progress/SKILL.md` 到 `repo/.claude/skills/review-progress/SKILL.md`
+- 複製 `templates/claude/skills/create-skill/SKILL.md` 到 `repo/.claude/skills/create-skill/SKILL.md`
+
+這些檔案讓 Project CC 從第一次 session 開始就能：
+- 追蹤和校準專案目標（rules 自動載入）
+- 建立新的工作流程 skill（/create-skill）
+- 檢視進度和下一步（/review-progress）
 
 ### 7. 寫入 .gitignore
 

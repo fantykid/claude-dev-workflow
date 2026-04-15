@@ -136,6 +136,29 @@ This project is **public on GitHub**. Security is the top priority.
 - `gpu: true` adds `--gpus all` flag (requires nvidia-container-toolkit on host)
 - `gstack: true` installs Bun + Playwright + gstack in Dockerfile
 
+## Self-Management System (templates/claude/)
+
+Generated projects include a self-management system that lets Project CC maintain continuity across sessions:
+
+### Design Principles
+- **Rules** (`.claude/rules/`) are loaded every session unconditionally — use for goals, decisions, constraints
+- **Skills** (`.claude/skills/`) are auto-discovered by description — use for repeatable workflows
+- **Auto-memory** is built into Claude Code — no template config needed, just awareness in CLAUDE.md
+- The `.gitignore` template preserves `.claude/skills/` and `.claude/rules/` (not ignored)
+
+### Template Files
+- `templates/claude/rules/project-goals.md` — goal tracking template, Bootstrap fills `{{PROJECT_GOALS}}`
+- `templates/claude/rules/decisions.md` — decision log template, Project CC fills during development
+- `templates/claude/skills/review-progress/SKILL.md` — auto-invoked for progress queries
+- `templates/claude/skills/create-skill/SKILL.md` — manual-only meta-skill for creating new skills
+- `templates/claude/CLAUDE.md` — includes "自我管理" section instructing CC to use all of the above
+
+### When Modifying Templates
+- Changes to rules/skills templates affect ALL future projects
+- Keep rules templates minimal (Project CC fills in the content)
+- Skill descriptions must be specific enough for auto-discovery to work
+- Test self-management flow: `init.sh test-xxx` → bootstrap → build → start → verify CC knows its goals
+
 ## Git Conventions
 
 - This repo is public on GitHub — never commit tokens, credentials, or paths containing sensitive info

@@ -18,5 +18,8 @@ build/
 id_rsa
 id_ed25519
 
-# Claude Code local settings
-.claude/
+# Claude Code（保留 skills/ 和 rules/ 以持久化專案知識）
+.claude/settings.json
+.claude/settings.local.json
+.claude/commands/
+.claude/CLAUDE.md

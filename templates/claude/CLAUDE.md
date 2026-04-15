@@ -71,6 +71,44 @@ npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）
 6. 從 /secrets/ 讀取憑證，不要硬編碼
 7. 不要嘗試操作 Docker（容器內無 Docker）
 
+## 自我管理（跨 Session 持續性）
+
+你有多個持久化機制可用。**主動使用它們**是你的職責，不要等使用者提醒。
+
+### 目標追蹤（.claude/rules/project-goals.md）
+- 此檔案每次 session 啟動時自動載入
+- **階段 1 討論結束後**：將確認的目標、里程碑寫入此檔案
+- **完成里程碑時**：立即更新（勾選已完成、新增下一步）
+- **每次 session 開始**：先讀取目標，確保工作方向與核心目標一致
+- 如果使用者的要求偏離核心目標，主動提醒並確認
+
+### 決策記錄（.claude/rules/decisions.md）
+- 此檔案每次 session 啟動時自動載入
+- 重要的架構/技術決策必須記錄：日期 + 決策 + 原因 + 替代方案
+- 什麼算「重要」：語言/框架選擇、資料庫設計、API 設計、安全模型、部署架構
+- 目的：讓未來的 session（包括你自己）不重複討論已解決的問題
+
+### Skill 創建（.claude/skills/）
+- 當你發現自己在 **同一個 session 中重複執行相同的多步驟流程**（如測試→lint→commit）時，主動提議將其封裝為 skill
+- Skill 放在 `.claude/skills/<name>/SKILL.md`，使用 YAML frontmatter 設定 `description`
+- 設定好 description 後，你在未來 session 中會自動辨識並使用這些 skill
+- 使用 `/create-skill <描述>` 來引導建立流程
+- **不要過度封裝**：單一命令不需要 skill，至少涉及 2 步以上
+
+### Auto-memory
+- Claude Code 內建的 auto-memory 已啟用，會自動記錄你在工作中發現的模式和偏好
+- auto-memory 儲存在 `~/.claude/projects/` 下，跨 session 持久
+- **不需要手動重複記錄** auto-memory 已涵蓋的內容（偏好、慣例、除錯心得）
+- **Rules 和 auto-memory 的分工**：
+  - Rules（`.claude/rules/`）：目標、決策、約束 — 必須每次載入的硬性指導
+  - Auto-memory：偏好、模式、心得 — 軟性學習，自動管理
+
+### 主動工具建設
+- 如果專案有特定的品質需求（如嚴格的型別檢查、安全掃描），建立對應的 skill
+- 如果某個 debug 流程你做了第三次，封裝它
+- 如果使用者反覆要求同樣的報告格式，封裝它
+- 向使用者報告你建立了什麼 skill，讓他們知道可以用 `/skill-name` 調用
+
 ## 專案資訊
 {{PROJECT_DESCRIPTION}}
 
