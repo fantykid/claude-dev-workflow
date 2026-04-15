@@ -68,11 +68,16 @@ This project is **public on GitHub**. Security is the top priority.
 - Default policy: DROP all traffic, then allow only whitelisted domains
 
 ### Firewall (init-firewall.sh)
-- Whitelisted domains: GitHub (via API meta), npm registry, Claude API, Sentry, Statsig, VS Code marketplace
-- GitHub IPs added with `timeout 0` (permanent)
-- Domain IPs resolved via DNS, also `timeout 0`
+- Whitelisted domains (3 categories):
+  - **Claude Code infra**: api.anthropic.com, sentry.io, statsig.anthropic.com, statsig.com
+  - **Package registries**: npm (registry.npmjs.org), pip (pypi.org, files.pythonhosted.org), Go (proxy.golang.org, sum.golang.org), Rust (crates.io, static.crates.io)
+  - **IDE**: VS Code marketplace, blob, update domains
+- GitHub IPs fetched dynamically from API meta (web + api + git ranges), `timeout 0`
+- Domain IPs resolved via DNS at runtime, also `timeout 0`
+- Duplicate IPs handled gracefully (`|| true` on ipset add)
 - IPv6 fully blocked (only loopback allowed)
 - Verification: confirms example.com is blocked and api.github.com is reachable
+- For additional domains (conda, maven, rubygems, etc.): add per-project in init-firewall.sh
 
 ### Token Handling
 - OAuth token stored in `~/.claude/.oauth-token` on host (must be chmod 600)

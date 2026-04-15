@@ -78,6 +78,9 @@ while read -r cidr; do
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | (aggregate -q 2>/dev/null || sort -u))
 
 # Resolve and add other allowed domains
+# - Claude Code infrastructure: anthropic, sentry, statsig
+# - Package registries: npm, pip, go, cargo
+# - IDE: VS Code marketplace and updates
 for domain in \
     "registry.npmjs.org" \
     "api.anthropic.com" \
@@ -86,7 +89,13 @@ for domain in \
     "statsig.com" \
     "marketplace.visualstudio.com" \
     "vscode.blob.core.windows.net" \
-    "update.code.visualstudio.com"; do
+    "update.code.visualstudio.com" \
+    "pypi.org" \
+    "files.pythonhosted.org" \
+    "proxy.golang.org" \
+    "sum.golang.org" \
+    "crates.io" \
+    "static.crates.io"; do
     echo "Resolving $domain..."
     ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
     if [ -z "$ips" ]; then
