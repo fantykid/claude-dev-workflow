@@ -70,6 +70,12 @@ npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）
 5. 資料庫、生成檔案等存放在 /data
 6. 從 /secrets/ 讀取憑證，不要硬編碼
 7. 不要嘗試操作 Docker（容器內無 Docker）
+8. **防火牆限制處理**：容器的出站網路受防火牆白名單限制。當你嘗試安裝套件或下載資源失敗時（pip install、cargo install、curl 等），**必須立即主動告知使用者**：
+   - 明確說出哪個工具/套件安裝失敗
+   - 說明是防火牆限制導致
+   - 提供需要加入白名單的域名（如 `conda.anaconda.org`）
+   - 請使用者在 host 端協助（修改 init-firewall.sh 或在 Dockerfile build 階段預裝）
+   - **絕對不要**因為安裝失敗就靜默跳過或用低品質替代方案湊合
 
 ## 自我管理（跨 Session 持續性）
 
