@@ -38,7 +38,11 @@ USER node
 ARG CACHEBUST_TOOLS=0
 
 # 安裝 Claude Code（對齊官方）
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+# 最低版本要求：v2.1.59（auto-memory）、v2.0.64（.claude/rules/）
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && INSTALLED_VER=$(claude --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) \
+    && echo "Installed Claude Code: ${INSTALLED_VER}" \
+    && node -e "const v=process.argv[1].split('.').map(Number); const min=[2,1,59]; const ok = v[0]>min[0] || (v[0]===min[0] && (v[1]>min[1] || (v[1]===min[1] && v[2]>=min[2]))); if(!ok){console.error('ERROR: Claude Code '+process.argv[1]+' < 2.1.59 (auto-memory required)');process.exit(1)}" "${INSTALLED_VER}"
 
 # === Bootstrap 會根據是否啟用 gstack 在此加入 gstack 安裝 ===
 # {{GSTACK_INSTALL}}

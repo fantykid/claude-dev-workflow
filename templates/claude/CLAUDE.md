@@ -102,12 +102,29 @@ npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）
 - **不要過度封裝**：單一命令不需要 skill，至少涉及 2 步以上
 
 ### Auto-memory
-- Claude Code 內建的 auto-memory 已啟用，會自動記錄你在工作中發現的模式和偏好
-- auto-memory 儲存在 `~/.claude/projects/` 下，跨 session 持久
+- Claude Code 內建的 auto-memory 已啟用（需 v2.1.59+），會自動記錄你在工作中發現的模式和偏好
+- auto-memory 儲存在 `~/.claude/projects/<project>/memory/` 下，跨 session 持久
 - **不需要手動重複記錄** auto-memory 已涵蓋的內容（偏好、慣例、除錯心得）
 - **Rules 和 auto-memory 的分工**：
   - Rules（`.claude/rules/`）：目標、決策、約束 — 必須每次載入的硬性指導
   - Auto-memory：偏好、模式、心得 — 軟性學習，自動管理
+
+### MEMORY.md 紀律（重要）
+- auto-memory 的 `MEMORY.md` 每次 session 只載入**前 200 行或 25KB**（以先到者為準），超過部分不會自動載入
+- 保持 `MEMORY.md` 為**簡潔索引**：每個記憶一行連結 + 短描述（< 150 字元）
+- 詳細內容寫在獨立主題檔（如 `debugging.md`、`patterns.md`），主題檔**不會**自動載入，需要時讀取
+- 定期審視 `MEMORY.md`，把過時或冗餘項目移除
+
+### Skill 生命週期
+- Skill 被調用時，`SKILL.md` 內容一次性注入 session，之後**不會重讀**
+- 若在 session 中修改了某個 skill 的 SKILL.md，需重新調用（`/skill-name`）才會看到新版本
+- 寫 skill 時，把「貫穿整個任務的規則」當成常駐指令寫，不要寫成一次性步驟
+
+### 軟引導聲明（誠實面對限制）
+- `.claude/rules/`、skills、auto-memory、CLAUDE.md 皆為 **best-effort 軟引導**，不是強制執行層
+- 載入不等於遵守 — Claude 仍可能因為對話焦點偏移而忽略其中內容
+- 若你發現自己偏離了 `.claude/rules/project-goals.md` 的核心目標，**主動停下來**提醒使用者並確認方向
+- 若發現規則之間有衝突，優先詢問使用者而非自己決定
 
 ### 主動工具建設
 - 如果專案有特定的品質需求（如嚴格的型別檢查、安全掃描），建立對應的 skill
