@@ -183,8 +183,14 @@ ensure_bootstrap_image() {
 
     new_id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || new_id=""
     if [ -n "$old_id" ] && [ "$old_id" != "$new_id" ]; then
-        # 被執行中的容器使用或有其他 tag 時會刪不掉，忽略即可
-        docker image rm "$old_id" >/dev/null 2>&1 || true
+        # 只刪除已經沒有任何 tag、也沒有容器使用的舊 image：
+        # docker image rm <ID> 會連同 image 上的其他 tag 一起刪掉（使用者自己標記的備份也不例外），所以要先確認
+        local old_tags old_users
+        old_tags=$(docker image inspect --format '{{len .RepoTags}}' "$old_id" 2>/dev/null) || old_tags=""
+        old_users=$(docker ps -a -q --filter "ancestor=${old_id}" 2>/dev/null) || old_users="unknown"
+        if [ "$old_tags" = "0" ] && [ -z "$old_users" ]; then
+            docker image rm "$old_id" >/dev/null 2>&1 || true
+        fi
     fi
     echo "✓ Bootstrap Claude Code: ${target:-latest}"
 }
