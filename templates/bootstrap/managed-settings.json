@@ -33,5 +33,7 @@
     ],
     "disableAutoMode": "disable",
     "disableBypassPermissionsMode": "disable"
-  }
+  },
+  "allowManagedPermissionRulesOnly": true,
+  "strictPluginOnlyCustomization": true
 }

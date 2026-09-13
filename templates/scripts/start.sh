@@ -74,6 +74,9 @@ if [ "$AGENT" = "claude" ]; then
         echo "Fix with: chmod 600 $TOKEN_FILE"
         exit 1
     fi
+    if [ ! -s "$TOKEN_FILE" ]; then
+        echo "WARNING: $TOKEN_FILE is empty; run /login inside the container (the login is kept in claude-data/)"
+    fi
 fi
 
 # 防火牆 image 必須在建立容器之前就緒：失敗就不啟動，不會出現沒有防火牆的容器

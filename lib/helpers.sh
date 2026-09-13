@@ -93,3 +93,107 @@ cdw_apply_firewall() {
         -e "EXTRA_ALLOWED_DOMAINS=${extra_domains}" \
         "$FIREWALL_IMAGE" "$@"
 }
+
+BOOTSTRAP_IMAGE="bootstrap-claude:latest"
+CDW_LABEL_CLAUDE_VERSION="claude-dev-workflow.claude-code-version"
+
+# 查詢 npm 上 Claude Code 的版本號（BOOTSTRAP_CLAUDE_CHANNEL=latest|stable，預設 latest）；查不到時輸出空字串
+cdw_claude_code_version() {
+    local channel="${BOOTSTRAP_CLAUDE_CHANNEL:-latest}" version=""
+    if [ "$channel" != "latest" ] && [ "$channel" != "stable" ]; then
+        echo "WARNING: BOOTSTRAP_CLAUDE_CHANNEL must be latest or stable; using latest" >&2
+        channel="latest"
+    fi
+    if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+        version=$(curl -fsS --max-time 10 "https://registry.npmjs.org/@anthropic-ai/claude-code/${channel}" 2>/dev/null \
+            | jq -r '.version // empty' 2>/dev/null) || version=""
+    fi
+    if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        printf '%s' "$version"
+    fi
+}
+
+# 確保 Bootstrap image 使用最新的 Claude Code，且包含目前 templates/bootstrap/ 的權限政策
+# BOOTSTRAP_AUTO_UPDATE=0 跳過更新檢查；BOOTSTRAP_CLAUDE_CHANNEL=stable 改追 stable 通道
+# 只有在沒有可用的新式 image 時回傳 1（舊式 image 沒有 managed settings，不能沿用）
+ensure_bootstrap_image() {
+    local context="$1/bootstrap" image="${2:-$BOOTSTRAP_IMAGE}"
+    local hash target current_hash="" current_version="" old_id="" new_id has_image=false usable=false
+    if [ ! -f "${context}/Dockerfile" ]; then
+        echo "Error: Bootstrap image context not found: ${context}" >&2
+        return 1
+    fi
+    hash=$(cdw_dir_hash "$context") || hash=""
+
+    if docker image inspect "$image" >/dev/null 2>&1; then
+        has_image=true
+        old_id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || old_id=""
+        current_hash=$(cdw_image_label "$image" "$CDW_LABEL_CONTEXT")
+        current_version=$(cdw_image_label "$image" "$CDW_LABEL_CLAUDE_VERSION")
+        # 有 context label 的才是含權限政策的新式 image
+        if [ -n "$current_hash" ]; then
+            usable=true
+        fi
+    fi
+
+    if [ "$usable" = true ] && [ "${BOOTSTRAP_AUTO_UPDATE:-1}" = "0" ]; then
+        return 0
+    fi
+
+    target=$(cdw_claude_code_version)
+    if [ -z "$target" ]; then
+        if [ "$usable" = true ]; then
+            echo "WARNING: 無法查詢 Claude Code 最新版本（npm registry 無法連線），沿用現有 Bootstrap image（Claude Code ${current_version:-unknown}）" >&2
+            return 0
+        fi
+        echo "WARNING: 無法查詢 Claude Code 最新版本，改以 latest 建置 Bootstrap image" >&2
+    fi
+
+    if [ "$usable" = true ] && [ -n "$target" ] && [ "$target" = "$current_version" ] \
+        && [ -n "$hash" ] && [ "$hash" = "$current_hash" ]; then
+        echo "Bootstrap Claude Code: ${current_version} (up to date)"
+        return 0
+    fi
+
+    if [ "$has_image" = true ]; then
+        echo "Updating Bootstrap image: Claude Code ${current_version:-unknown} -> ${target:-latest}"
+    else
+        echo "Building Bootstrap image: Claude Code ${target:-latest}"
+    fi
+    local build_args=(--build-arg "CLAUDE_CODE_VERSION=${target:-latest}"
+        --label "${CDW_LABEL_CONTEXT}=${hash}"
+        --label "${CDW_LABEL_CLAUDE_VERSION}=${target}"
+        -t "$image" "$context")
+    if ! docker build --pull "${build_args[@]}"; then
+        echo "WARNING: build with --pull failed; retrying with the cached base image" >&2
+        if ! docker build "${build_args[@]}"; then
+            if [ "$usable" = true ]; then
+                echo "WARNING: 無法更新 Bootstrap image，沿用現有版本（Claude Code ${current_version:-unknown}）" >&2
+                return 0
+            fi
+            echo "Error: failed to build ${image}" >&2
+            if [ "$has_image" = true ]; then
+                echo "The existing ${image} predates the Bootstrap security policy and will not be used." >&2
+            fi
+            return 1
+        fi
+    fi
+
+    new_id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || new_id=""
+    if [ -n "$old_id" ] && [ "$old_id" != "$new_id" ]; then
+        # 被執行中的容器使用或有其他 tag 時會刪不掉，忽略即可
+        docker image rm "$old_id" >/dev/null 2>&1 || true
+    fi
+    echo "✓ Bootstrap Claude Code: ${target:-latest}"
+}
+
+# 直接執行時手動更新 image，例如：./lib/helpers.sh bootstrap（讓舊專案的 bootstrap.sh 也用上新版）
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    set -euo pipefail
+    CDW_TEMPLATES="$(cd "$(dirname "$0")/.." && pwd)/templates"
+    case "${1:-}" in
+        bootstrap) ensure_bootstrap_image "$CDW_TEMPLATES" ;;
+        firewall) ensure_firewall_image "$CDW_TEMPLATES" ;;
+        *) echo "Usage: $0 bootstrap|firewall"; exit 1 ;;
+    esac
+fi
