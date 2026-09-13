@@ -40,7 +40,7 @@ disable-model-invocation: true
 - **Agent（容器內的開發代理）**：容器內可用 **Claude Code**（預設）或 **OpenAI Codex CLI**。**主動詢問使用者要用哪一個**。
   - 若選 **codex**：
     1. **認證**：在容器內執行 `codex login --device-auth`（需先在 ChatGPT 的安全設定啟用裝置碼登入），或把已登入電腦上的 `~/.codex/auth.json` 複製到 host 的 `codex-data/`；登入狀態持久化於 codex-data（掛載為 `~/.codex`）。
-    2. **筆記 MCP**：預設開啟（`notes_mcp`，見步驟 3）。host 端依 `mcp-access` 食譜備妥內網 + 共用 token 後，新專案零手動步驟即自動接上；某專案不接才設 `"notes_mcp": false`。
+    2. **筆記 MCP**：與 claude 相同，host 有設定時會自動接上（見步驟 3 的 `notes_mcp`）。
   - `agent` 影響 Dockerfile 的安裝內容、專案指引檔（claude→`CLAUDE.md`；codex→`AGENTS.md`）、以及 start.sh/enter.sh 的行為（皆已 agent-aware）。
 - **GPU**：若描述提到 GPU、CUDA、模型訓練、推理、3D 重建、機器學習等，設 `gpu` 為 `true`。
 - **自訂 Base Image**：若專案需要特殊環境（如 CUDA、PyTorch 官方 image 等），見下方「自訂 Base Image 規則」。
@@ -74,11 +74,9 @@ disable-model-invocation: true
 - `ports`：需要幾個 port 就列幾個（1024–65535），無需暴露則為 `[]`。start.sh 會從 10000–19999 分配實際 port（host 與容器相同），並以 `$PORT`（第一個）與 `$PORT_0`、`$PORT_1`… 傳入容器
 - `services`：你推斷需要的外部服務，無則為 `[]`
 - `agent`：容器內開發代理，`"claude"`（預設）或 `"codex"`。start.sh／enter.sh 會依此分流認證、持久化與 MCP 設定。
-- **筆記 MCP（`notes_mcp`，預設開啟 — 不必寫此欄位）**：若 host 上已依 `/srv/data/projects/ai-note/repo/docs/mcp-access-recipe.md` 建好 `mcp-access` 內網與共用 token，start.sh 會自動把容器接上並寫入 MCP 設定，**新專案零手動步驟**。
+- **筆記 MCP（`notes_mcp`，預設開啟，不必寫此欄位）**：只有 host 上有筆記 MCP 設定檔（`~/.config/claude-dev-workflow/notes-mcp.json`，見 README）時才有作用。start.sh 會把容器接上設定指定的 Docker network、在防火牆放行該網段，並寫入 MCP 設定（claude → `/workspace/.mcp.json`；codex → `~/.codex/config.toml`），新專案不需要手動設定。
   - 要讓某專案**不接**才加 `"notes_mcp": false`。
-  - token 來源：全機共用 `~/ai-note-secrets/dev-token`；需 private/admin 的專案放專屬 token 到 `secrets/notes-token`（覆蓋共用那枚）。
-  - claude → 合併寫入 `/workspace/.mcp.json`（server 名 `ai-note-live`，headers Bearer）；codex → 追加寫入 `~/.codex/config.toml`（`[mcp_servers.ai-note-live]` url + `bearer_token_env_var=NOTES_TOKEN`，token 不落地）。
-  - 防火牆模板已含靜態放行 `172.30.0.0/24`（未 attach 時無害）；start.sh 會 POST `tools/list` 驗證並印 200/401/403/000 診斷。
+  - 專案需要不同的 token 時，放在 host 的 `secrets/notes-token`（取代共用的 token）。
 - `mcp_search`：是否啟用網路搜尋能力（透過 MCP Search Server），`true` 或 `false`（codex 與 claude 皆支援，start.sh 會用對應格式寫入）
 - `extra_allowed_domains`：開發容器額外放行的網域（字串陣列；只接受一般網域名稱，不支援萬用字元，最多 50 個）
 - `gpu`：是否啟用 GPU 直通（`--gpus all`），需要 CUDA/GPU 計算的專案設為 `true`（host 需安裝 nvidia-container-toolkit）
@@ -124,7 +122,7 @@ disable-model-invocation: true
 - 若 `agent: "codex"`：改寫入 `repo/AGENTS.md`。以 `templates/claude/CLAUDE.md` 為骨架但**針對 Codex 調整**：
   - 標題與角色改為 Codex；說明 Codex 自動讀 `AGENTS.md`。
   - 開發指令從 `claude --dangerously-skip-permissions` 改為 `codex`；首次登入用 `codex login --device-auth`（需先在 ChatGPT 安全設定啟用裝置碼登入）。
-  - 若有接 MCP（search、ai-note），加一節說明工具由 start.sh 寫入 `~/.codex/config.toml`、如何排查。
+  - 若有接 MCP（search、筆記 MCP），加一節說明工具由 start.sh 寫入 `~/.codex/config.toml`、如何排查。
   - 「自我管理」改為：每次 session 開始先讀 `docs/project-goals.md` 與 `docs/decisions.md` 並持續維護；可重複的多步驟流程封裝成 `.agents/skills/<name>/SKILL.md`（Codex 會自動載入）。
   - 刪除只適用 Claude Code 的內容（`.claude/rules`、auto-memory、`/skill-name` 呼叫方式等）。
 

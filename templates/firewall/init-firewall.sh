@@ -29,6 +29,21 @@ esac
 
 DOMAIN_RE='^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'
 
+# 是否為 RFC 1918 私有位址範圍內的 IPv4 CIDR（與 lib/helpers.sh 的 cdw_is_private_ipv4_cidr 相同規則）
+is_private_ipv4_cidr() {
+    local cidr="$1" a b len octet
+    [[ "$cidr" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]] || return 1
+    for octet in "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"; do
+        [ "$((10#$octet))" -le 255 ] || return 1
+    done
+    a=$((10#${BASH_REMATCH[1]})); b=$((10#${BASH_REMATCH[2]})); len=$((10#${BASH_REMATCH[5]}))
+    [ "$len" -le 32 ] || return 1
+    if [ "$a" -eq 10 ] && [ "$len" -ge 8 ]; then return 0; fi
+    if [ "$a" -eq 172 ] && [ "$b" -ge 16 ] && [ "$b" -le 31 ] && [ "$len" -ge 12 ]; then return 0; fi
+    if [ "$a" -eq 192 ] && [ "$b" -eq 168 ] && [ "$len" -ge 16 ]; then return 0; fi
+    return 1
+}
+
 # 預設放行的網域
 # - Claude Code：api.anthropic.com、platform.claude.com（OAuth token 交換/更新）、sentry.io、statsig.com（對齊官方 devcontainer）
 # - Codex / OpenAI：API + ChatGPT 訂閱登入 + codex backend
@@ -68,6 +83,18 @@ if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
     for domain in "${EXTRA_DOMAINS[@]}"; do
         if [[ ! "$domain" =~ $DOMAIN_RE ]]; then
             echo "ERROR: Invalid domain in EXTRA_ALLOWED_DOMAINS: $domain"
+            exit 1
+        fi
+    done
+fi
+
+# 額外放行的私有網段（start.sh 傳入，例如筆記 MCP 所在的 Docker network）；只接受 RFC 1918 範圍內的 IPv4 CIDR
+EXTRA_NETWORKS=()
+if [ -n "${EXTRA_ALLOWED_NETWORKS:-}" ]; then
+    IFS=' ' read -r -a EXTRA_NETWORKS <<< "$EXTRA_ALLOWED_NETWORKS"
+    for net in "${EXTRA_NETWORKS[@]}"; do
+        if ! is_private_ipv4_cidr "$net"; then
+            echo "ERROR: EXTRA_ALLOWED_NETWORKS only accepts private IPv4 CIDRs (10/8, 172.16/12, 192.168/16): $net"
             exit 1
         fi
     done
@@ -271,9 +298,11 @@ iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 # Then allow only specific outbound traffic to allowed domains
 iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 
-# OPTIONAL（mcp-access）：允許連到同機筆記 MCP 的內部網路（172.30.0.0/24）。
-# 未建立該網路 / 未 attach 時此規則無害（該網段不存在）。回應走 ESTABLISHED，故只需 OUTPUT。
-iptables -A OUTPUT -d 172.30.0.0/24 -j ACCEPT
+# 選用：start.sh 傳入的私有網段（例如筆記 MCP 所在的 Docker network）。回應走 ESTABLISHED，所以只需要 OUTPUT
+for net in "${EXTRA_NETWORKS[@]}"; do
+    echo "Allowing private network ${net}"
+    iptables -A OUTPUT -d "$net" -j ACCEPT
+done
 
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited

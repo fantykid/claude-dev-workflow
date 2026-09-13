@@ -229,13 +229,49 @@ if [ "$AGENT" = "claude" ]; then
         "echo 'export CLAUDE_CODE_OAUTH_TOKEN=\$(cat ${CONTAINER_HOME}/.claude/.oauth-token 2>/dev/null)' > /etc/profile.d/claude-token.sh && chmod 644 /etc/profile.d/claude-token.sh"
 fi
 
-# （筆記 MCP 的 attach/設定移到防火牆之後，見下方 notes_mcp 區塊 — 防火牆規則為靜態，不需先 attach）
+# ============================================================
+# 筆記 MCP（選用）：私人 MCP server 跑在 host 的某個 Docker network 上時，自動把容器接上
+# 設定只放在 host、repo 之外（~/.config/claude-dev-workflow/notes-mcp.json，格式見 README）
+# 某專案不接就在 project-config.json 設 "notes_mcp": false
+# 防火牆要放行該 network 的網段，所以在套用防火牆之前先確認設定、token 與 network
+# ============================================================
+# 注意：不能用 `.notes_mcp // true`，jq 的 // 會把 false 當成「沒有值」而回傳 true
+NOTES_MCP=$(jq -r 'if (.notes_mcp == false or .notes_mcp == "false") then "false" else "true" end' "$CONFIG_FILE" 2>/dev/null || echo "true")
+NOTES_STATE=""   # 空字串＝沒有設定或此專案關閉；其餘為 skipped、ready、unverified、verified
+NOTES_SUBNETS=""
+if [ "$NOTES_MCP" = "true" ]; then
+    notes_rc=0
+    cdw_notes_mcp_config || notes_rc=$?
+    if [ "$notes_rc" -eq 2 ]; then
+        NOTES_STATE="skipped"
+    elif [ "$notes_rc" -eq 0 ]; then
+        NOTES_STATE="skipped"
+        # 專案專屬的 token 優先（例如需要不同權限時），否則用設定檔指定的共用 token
+        NOTES_TOKEN_SOURCE="${PROJECT_DIR}/secrets/notes-token"
+        [ -r "$NOTES_TOKEN_SOURCE" ] || NOTES_TOKEN_SOURCE="$NOTES_TOKEN_FILE"
+        if [ ! -r "$NOTES_TOKEN_SOURCE" ]; then
+            echo "WARNING: 筆記 MCP 的 token 檔不存在或無法讀取（${NOTES_TOKEN_FILE}），跳過筆記 MCP"
+        elif ! NOTES_SUBNETS=$(cdw_docker_network_private_subnets "$NOTES_NETWORK"); then
+            NOTES_SUBNETS=""
+            echo "WARNING: Docker network ${NOTES_NETWORK} 不存在，跳過筆記 MCP"
+        elif [ -z "$NOTES_SUBNETS" ]; then
+            echo "WARNING: Docker network ${NOTES_NETWORK} 沒有可放行的私有 IPv4 網段，跳過筆記 MCP"
+        else
+            NOTES_STATE="ready"
+        fi
+    fi
+fi
 
 # ============================================================
 # 透過 host 建置的防火牆 image 套用防火牆（一次性容器，共享 network namespace）
 # 開發容器本身無 NET_ADMIN，也碰不到防火牆腳本，無法關閉或修改規則
 # ============================================================
 echo "Initializing firewall via external container (${FIREWALL_IMAGE})..."
+# 筆記 MCP 就緒時，額外放行它所在 Docker network 的私有網段（cdw_apply_firewall 讀取 CDW_ALLOWED_NETWORKS）
+CDW_ALLOWED_NETWORKS=""
+if [ "$NOTES_STATE" = "ready" ]; then
+    CDW_ALLOWED_NETWORKS="$NOTES_SUBNETS"
+fi
 if ! cdw_apply_firewall "${CONTAINER}" "${EXTRA_DOMAINS}"; then
     echo "ERROR: Firewall initialization failed."
     echo "Removing container for safety — do not use without firewall."
@@ -293,7 +329,7 @@ url = \"${SEARCH_URL}\"
 "
     fi
 
-    # 寫入容器內 ~/.codex/config.toml（以容器使用者身分，確保擁有權正確；ai-note-live 於下方 notes 區塊追加）
+    # 寫入容器內 ~/.codex/config.toml（以容器使用者身分，確保擁有權正確；筆記 MCP 於下方另外追加）
     printf '%s' "$CODEX_TOML" | docker exec -i -u "${CONTAINER_USER}" "${CONTAINER}" sh -c "cat > ${CONTAINER_HOME}/.codex/config.toml"
 elif [ "$MCP_SEARCH" = "true" ]; then
     # ---- Claude Code：沿用 .mcp.json（由 start.sh 管理，已列入 .gitignore）----
@@ -314,65 +350,51 @@ MCPEOF"
 fi
 
 # ============================================================
-# 筆記 MCP（同機 mcp-access 內網 → production ai-note；server 名 ai-note-live）
-# 依 /srv/data/projects/ai-note/repo/docs/mcp-access-recipe.md（authoritative）
-# 預設開啟；某專案不接就在 project-config.json 設 "notes_mcp": false
+# 筆記 MCP：接上 host 設定的 Docker network，寫入 MCP 設定並驗證（就緒檢查與防火牆放行在上方）
 # ============================================================
-# 注意：不能用 `.notes_mcp // true`，jq 的 // 會把 false 當成「沒有值」而回傳 true
-NOTES_MCP=$(jq -r 'if (.notes_mcp == false or .notes_mcp == "false") then "false" else "true" end' "$CONFIG_FILE" 2>/dev/null || echo "true")
-NOTES_URL="http://ainote-mcp:47823/mcp"
-NOTES_CONFIGURED=""
-if [ "$NOTES_MCP" = "true" ]; then
-    # token 來源：專案專屬優先（需要 private/admin 時個別覆蓋），否則用全機共用那枚
-    NOTES_TOKEN_FILE="${PROJECT_DIR}/secrets/notes-token"
-    [ -r "$NOTES_TOKEN_FILE" ] || NOTES_TOKEN_FILE="${HOME}/ai-note-secrets/dev-token"
-    if [ ! -r "$NOTES_TOKEN_FILE" ]; then
-        echo "WARNING: 找不到 ${HOME}/ai-note-secrets/dev-token（見 mcp-access-recipe.md Part A 步驟 4/5），跳過筆記 MCP"
-    elif ! docker network inspect mcp-access >/dev/null 2>&1; then
-        echo "WARNING: mcp-access 網路不存在（見 recipe Part A），跳過筆記 MCP"
+if [ "$NOTES_STATE" = "ready" ]; then
+    NOTES_STATE="unverified"
+    docker network connect "$NOTES_NETWORK" "${CONTAINER}" 2>/dev/null || true
+    NOTES_TOKEN=$(cat "$NOTES_TOKEN_SOURCE")
+    if [ "$AGENT" = "codex" ]; then
+        # Codex：token 放進 codex-data 供 env 載入，config.toml 用 bearer_token_env_var（token 不寫進 config.toml）
+        printf '%s' "$NOTES_TOKEN" > "${PROJECT_DIR}/codex-data/.notes-token"
+        chmod 600 "${PROJECT_DIR}/codex-data/.notes-token"
+        docker exec -u root "${CONTAINER}" sh -c \
+            "echo 'export NOTES_TOKEN=\$(cat ${CONTAINER_HOME}/.codex/.notes-token 2>/dev/null)' > /etc/profile.d/notes-token.sh && chmod 644 /etc/profile.d/notes-token.sh"
+        printf '\n[mcp_servers.%s]\nurl = "%s"\nbearer_token_env_var = "NOTES_TOKEN"\n' "$NOTES_SERVER_NAME" "$NOTES_URL" \
+            | docker exec -i -u "${CONTAINER_USER}" "${CONTAINER}" sh -c "cat >> ${CONTAINER_HOME}/.codex/config.toml"
     else
-        docker network connect mcp-access "${CONTAINER}" 2>/dev/null || true
-        NOTES_TOKEN=$(cat "$NOTES_TOKEN_FILE")
-        if [ "$AGENT" = "codex" ]; then
-            # Codex：token 放進 codex-data 供 env 載入，config.toml 用 bearer_token_env_var（不落地）
-            printf '%s' "$NOTES_TOKEN" > "${PROJECT_DIR}/codex-data/.notes-token"
-            chmod 600 "${PROJECT_DIR}/codex-data/.notes-token"
-            docker exec -u root "${CONTAINER}" sh -c \
-                "echo 'export NOTES_TOKEN=\$(cat ${CONTAINER_HOME}/.codex/.notes-token 2>/dev/null)' > /etc/profile.d/notes-token.sh && chmod 644 /etc/profile.d/notes-token.sh"
-            docker exec -i -u "${CONTAINER_USER}" "${CONTAINER}" sh -c "cat >> ${CONTAINER_HOME}/.codex/config.toml" <<'TOML'
-
-[mcp_servers.ai-note-live]
-url = "http://ainote-mcp:47823/mcp"
-bearer_token_env_var = "NOTES_TOKEN"
-TOML
-        else
-            # Claude Code：合併進 /workspace/.mcp.json（保留既有 MCP 設定不覆蓋）
-            docker exec -u "${CONTAINER_USER}" -e NOTES_TOKEN="$NOTES_TOKEN" "${CONTAINER}" node -e '
-const fs=require("fs"), f="/workspace/.mcp.json";
-let j={mcpServers:{}}; try { j=JSON.parse(fs.readFileSync(f,"utf8")); } catch(e){}
+        # Claude Code：合併進 /workspace/.mcp.json（保留既有的 MCP 設定）；token 經 stdin 傳入，不出現在 host 的程序參數裡
+        printf '%s' "$NOTES_TOKEN" | docker exec -i -u "${CONTAINER_USER}" "${CONTAINER}" node -e '
+const fs = require("fs"), f = "/workspace/.mcp.json";
+const [name, url] = process.argv.slice(1);
+const token = fs.readFileSync(0, "utf8");
+let j = { mcpServers: {} };
+try { j = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) {}
 j.mcpServers = j.mcpServers || {};
-j.mcpServers["ai-note-live"] = { type:"http", url:"http://ainote-mcp:47823/mcp", headers:{ Authorization:"Bearer "+process.env.NOTES_TOKEN } };
-fs.writeFileSync(f, JSON.stringify(j,null,2));
-'
-        fi
-        # 認證感知可達性檢查（POST tools/list 帶 token，期望 200；--max-time 防 SSE 卡住；非致命）
-        HTTP_CODE=$(docker exec -e NT="$NOTES_TOKEN" "${CONTAINER}" sh -c "
-          curl -s -o /dev/null -w '%{http_code}' --max-time 6 \
-            -XPOST -H 'content-type: application/json' \
-            -H 'accept: application/json, text/event-stream' \
-            -H \"authorization: Bearer \${NT}\" \
-            -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' \
-            '${NOTES_URL}'
-        " 2>/dev/null || true)
-        HTTP_CODE=${HTTP_CODE:-000}
-        case "$HTTP_CODE" in
-            200) NOTES_CONFIGURED="true" ;;
-            401) echo "WARNING: ai-note 回 401 — token 未生效（tokens.json 沒有此 token，或改了但沒 restart ai-note）。" ;;
-            403) echo "WARNING: ai-note 回 403 — ainote-mcp:47823 不在 AINOTE_ALLOWED_HOSTS。" ;;
-            000) echo "WARNING: 連不到 ai-note（逾時/拒絕）— mcp-access 未就緒、防火牆未放行 172.30.0.0/24、或 server 只綁 127.0.0.1。" ;;
-            *)   echo "WARNING: ai-note 非預期回應 HTTP ${HTTP_CODE}（${NOTES_URL}）。" ;;
-        esac
+j.mcpServers[name] = { type: "http", url, headers: { Authorization: "Bearer " + token } };
+fs.writeFileSync(f, JSON.stringify(j, null, 2));
+' "$NOTES_SERVER_NAME" "$NOTES_URL"
     fi
+    # 帶 token 呼叫 tools/list 確認可用（期望 200；--max-time 避免 SSE 卡住；失敗不中止）
+    HTTP_CODE=$(printf '%s' "$NOTES_TOKEN" | docker exec -i "${CONTAINER}" sh -c '
+        IFS= read -r NT || true
+        curl -s -o /dev/null -w "%{http_code}" --max-time 6 -X POST \
+            -H "content-type: application/json" \
+            -H "accept: application/json, text/event-stream" \
+            -H "authorization: Bearer ${NT}" \
+            -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}" \
+            "$1"' sh "$NOTES_URL" 2>/dev/null || true)
+    # 輸出來自容器內的 curl，只接受三位數字
+    [[ "$HTTP_CODE" =~ ^[0-9]{3}$ ]] || HTTP_CODE="000"
+    case "$HTTP_CODE" in
+        200) NOTES_STATE="verified" ;;
+        401) echo "WARNING: 筆記 MCP 回 401：server 不接受這個 token。" ;;
+        403) echo "WARNING: 筆記 MCP 回 403：server 拒絕了這個連線（檢查 server 允許的 Host 設定）。" ;;
+        000) echo "WARNING: 連不到筆記 MCP（逾時或被拒絕）：確認 server 在 Docker network ${NOTES_NETWORK} 上執行，而且沒有只綁定 127.0.0.1。" ;;
+        *)   echo "WARNING: 筆記 MCP 回應非預期的 HTTP ${HTTP_CODE}（${NOTES_URL}）。" ;;
+    esac
 fi
 
 echo ""
@@ -388,11 +410,11 @@ if [ -n "$PORT_SUMMARY" ]; then
     echo "✓ Ports:"
     printf '%s' "$PORT_SUMMARY"
 fi
-if [ "${NOTES_CONFIGURED:-}" = "true" ]; then
-    echo "✓ Notes MCP (ai-note-live) enabled + verified 200 (${NOTES_URL})"
-elif [ "${NOTES_MCP:-true}" = "true" ]; then
-    echo "• Notes MCP: 設定已嘗試寫入，但未驗證成功（見上方 WARNING）"
-fi
+case "$NOTES_STATE" in
+    verified) echo "✓ Notes MCP (${NOTES_SERVER_NAME}) enabled + verified 200 (${NOTES_URL})" ;;
+    unverified) echo "• Notes MCP (${NOTES_SERVER_NAME}): 設定已寫入，但未驗證成功（見上方 WARNING）" ;;
+    skipped) echo "• Notes MCP: 已設定，但這次沒有接上（見上方 WARNING）" ;;
+esac
 if [ -n "$SEARCH_URL" ]; then
     echo "✓ MCP Search enabled (${SEARCH_URL})"
 fi

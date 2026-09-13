@@ -15,7 +15,8 @@ claude-dev-workflow/          ← THIS REPO (tool)
 ├── init.sh                   ← Entry point: creates new projects
 ├── lib/
 │   └── helpers.sh            ← Host-side helpers sourced by init.sh and generated scripts:
-│                               Bootstrap/firewall image updates, extra_allowed_domains validation, firewall apply
+│                               Bootstrap/firewall image updates, extra_allowed_domains validation,
+│                               notes MCP host config, firewall apply
 └── templates/
     ├── bootstrap/            ← Bootstrap image (build context) + project files
     │   ├── Dockerfile        ← node:22-bookworm + Claude Code (version passed in by lib/helpers.sh)
@@ -35,7 +36,7 @@ claude-dev-workflow/          ← THIS REPO (tool)
     │   ├── Dockerfile        ← debian:bookworm-slim + iptables/ipset/dig/curl
     │   └── init-firewall.sh  ← Apply (default) or --refresh the allowlist
     ├── scripts/              ← Host management script templates
-    │   ├── build.sh          ← Build dev container image
+    │   ├── build.sh          ← Build dev container image (asks before building repo/.devcontainer/ changes)
     │   ├── start.sh          ← Validate config, start container, apply firewall, MCP/GPU/ports
     │   ├── enter.sh          ← Enter running container (login shell)
     │   ├── stop.sh           ← Stop and remove container (a stopped container would restart without the firewall)
@@ -48,7 +49,7 @@ claude-dev-workflow/          ← THIS REPO (tool)
 
 1. `init.sh my-app` → ensures the Bootstrap image is current (`ensure_bootstrap_image`), creates `../my-app/` with sed-rendered scripts, launches the Bootstrap container
 2. Bootstrap (`/init-project`) reads `templates/` (read-only), asks the user, writes `repo/.devcontainer/Dockerfile`, `project-config.json`, `repo/CLAUDE.md` or `repo/AGENTS.md`, self-management files, `bootstrap-manifest.md`
-3. `build.sh` → builds the dev image from `repo/.devcontainer/Dockerfile` (agent install layer re-runs on every build)
+3. `build.sh` → copies `repo/.devcontainer/` to `.build-review/pending`, shows the diff against the last successful build and asks before building that copy (agent install layer re-runs on every build)
 4. `start.sh` → validates `project-config.json`, ensures the firewall image, removes the old container, allocates ports, starts the container, applies the firewall through a one-shot `claude-dev-firewall` container, configures MCP servers
 5. `enter.sh` → `bash --login` as `container_user`; the user starts `claude --dangerously-skip-permissions` or `codex`
 6. `firewall.sh` → re-applies the allowlist (`extra_allowed_domains`, rotated IPs) with an atomic ipset swap
@@ -75,7 +76,7 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 - No `NET_ADMIN`; the firewall script is not in the dev image at all
 - `--restart no`: firewall rules live in the container's network namespace, so a plain `docker restart`/`docker start` brings the container back without them (verified). `enter.sh` runs the firewall image with `--check` (allowlist ipset present and OUTPUT policy DROP) and refuses to enter an unfirewalled container. The firewall image is always run with `--pull never`
 - `project-config.json` is treated as untrusted input (Bootstrap writes it): `agent`, `container_user` (`^[a-z_][a-z0-9_-]{0,31}$`, not root), ports and `extra_allowed_domains` are validated before any container is touched; optional `docker run` arguments are passed as a bash array
-- Trust boundary: the project agent can edit `repo/.devcontainer/Dockerfile`, which takes effect on the next `build.sh` — users should review Dockerfile diffs
+- Trust boundary: the project agent can edit `repo/.devcontainer/`, which takes effect on the next `build.sh`. `build.sh` builds a copy (`.build-review/pending`), shows its diff against the last successful build (control characters stripped, symlinks not followed; a symlinked `.devcontainer` or Dockerfile is refused) and asks first; `--yes` skips the question, and the first build has nothing to compare against
 
 ### Firewall (templates/firewall/)
 - Runs from the host-built `claude-dev-firewall` image via `--network container:<dev container>` with `NET_ADMIN`/`NET_RAW`; `ensure_firewall_image` rebuilds it when `templates/firewall/` changes (content hash label)
@@ -86,7 +87,8 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
   - **GitHub**: `api.github.com/meta` web/api/git IPv4 ranges, plus codeload.github.com
   - **IDE**: VS Code marketplace, blob, update, and server download hosts
   - **Per project**: `extra_allowed_domains` from `project-config.json`
-  - Host /24 (MCP Search Server on the host) and 172.30.0.0/24 (notes MCP network)
+  - Host /24 (MCP Search Server on the host)
+  - **Notes MCP** (only when configured on the host): the private IPv4 subnets of its Docker network, passed as `EXTRA_ALLOWED_NETWORKS` and limited to RFC 1918 ranges
 - DNS only to Docker's embedded resolver (127.0.0.11); SSH only to allowlisted IPs; IPv6 blocked except loopback
 - Each domain is resolved with retries; a domain that still fails is skipped with a warning (non-fatal)
 - `--refresh` builds a new ipset and swaps it in atomically, then verifies; on failure it swaps the old set back
@@ -113,7 +115,7 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 - The firewall allowlists IP addresses: other sites on the same CDN IPs as an allowed domain are reachable (verified with Cloudflare). A domain/SNI-filtering egress proxy would close this
 - DNS queries through Docker's embedded resolver can still carry data out
 - The Bootstrap container has unrestricted network access
-- The project agent can edit `repo/.devcontainer/Dockerfile`. `build.sh` builds it with unrestricted network access, and the container runs for a few seconds before `start.sh` applies the firewall: `start.sh` skips the image's ENTRYPOINT and HEALTHCHECK, but a modified image can still run code then (for example by replacing `sleep`). Review `.devcontainer/` changes before rebuilding
+- The project agent can edit `repo/.devcontainer/Dockerfile`. `build.sh` builds it with unrestricted network access, and the container runs for a few seconds before `start.sh` applies the firewall: `start.sh` skips the image's ENTRYPOINT and HEALTHCHECK, but a modified image can still run code then (for example by replacing `sleep`). `build.sh` asks before building changes, so the safeguard is the user's review of that diff
 - `repo/.git/` is writable by the project agent, and git on the host runs hooks and config commands from it (for example `core.fsmonitor`)
 - Existing projects keep their old scripts and Dockerfile. Projects whose `repo/.devcontainer/init-firewall.sh` still treats a failed DNS lookup as fatal now abort on `start.sh`, because `statsig.anthropic.com` no longer resolves — remove that domain from the project's script and rebuild
 - Node.js 22 reaches end of life on 2027-04-30; bump both base images before then
@@ -162,7 +164,7 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 - `ports` only sets how many ports are needed; `start.sh` allocates host=container ports from 10000–19999 and passes `PORT`, `PORT_0`, `PORT_1`, …
 - `agent` selects the Dockerfile install, the guidance file (CLAUDE.md or AGENTS.md), and auth/persistence/MCP handling
 - `extra_allowed_domains`: plain domain names only (no wildcards), max 50; applied by `start.sh` and `firewall.sh`
-- `notes_mcp` (optional, default true): set `false` to skip the notes MCP integration
+- `notes_mcp` (optional, default true): set `false` to skip the notes MCP integration. It only acts when the host has `~/.config/claude-dev-workflow/notes-mcp.json` (`url`, `network`, `token_file`, optional `server_name`; validated by `cdw_notes_mcp_config`)
 - `container_user` determines paths in start.sh/enter.sh; must be a non-root user name
 - `gpu: true` adds `--gpus all` (requires nvidia-container-toolkit on host)
 - `gstack` is no longer supported; `start.sh` warns and ignores it
@@ -191,5 +193,6 @@ Generated projects include a self-management system that lets the project agent 
 ## Git Conventions
 
 - This repo is public on GitHub — never commit tokens, credentials, or paths containing sensitive info
+- Personal infrastructure details (hostnames, private network names, local paths) belong in host-side config such as `~/.config/claude-dev-workflow/notes-mcp.json`, never in templates or docs
 - Commit messages in English, code comments may be in Chinese (zh-TW)
 - Test on a fresh `init.sh` project before pushing changes

@@ -17,6 +17,7 @@ Two agents with distinct responsibilities work in separate containers:
   echo 'YOUR_TOKEN' > ~/.claude/.oauth-token && chmod 600 ~/.claude/.oauth-token
   ```
 - Optional: the MCP Search Server container (`claude-mcp-search`, port 9100) for web search inside dev containers
+- Optional: your own MCP server on a Docker network (see [Optional: Private MCP Server](#optional-private-mcp-server-notes-mcp))
 - Optional: nvidia-container-toolkit for GPU projects
 
 ## Quick Start: Create a New Project
@@ -47,7 +48,7 @@ exit
 ```
 
 ```bash
-# 4. Build the dev container image
+# 4. Build the dev container image (later builds show what changed in repo/.devcontainer/ and ask first)
 cd ~/projects/my-app
 ./scripts/build.sh
 
@@ -91,6 +92,26 @@ Start the container with `./scripts/start.sh`, then use the Dev Containers exten
 
 Don't create a `devcontainer.json` and use "Reopen in Container": VS Code would start a separate container without the firewall and without the hardening that `start.sh` applies.
 
+## Optional: Private MCP Server (Notes MCP)
+
+If you run your own MCP server in a container on a Docker network (for example a notes server), `start.sh` can connect every project to it. Describe the server in `~/.config/claude-dev-workflow/notes-mcp.json` on the host. The file lives outside this repo, so hostnames, network names and token paths stay out of git:
+
+```json
+{
+  "url": "http://notes-mcp:8080/mcp",
+  "network": "notes-net",
+  "token_file": "~/.config/claude-dev-workflow/notes-token",
+  "server_name": "notes"
+}
+```
+
+With that file in place, `start.sh`:
+- connects the dev container to `network` and lets the firewall through to that network's private IPv4 subnet
+- adds the server to `/workspace/.mcp.json` (Claude Code) or `~/.codex/config.toml` (Codex), with the token as a bearer token
+- calls `tools/list` and warns unless the server answers with HTTP 200
+
+Keep the token file `chmod 600`. A project can use its own token in `secrets/notes-token`, or skip the server with `"notes_mcp": false` in `project-config.json`. Without `notes-mcp.json`, nothing happens.
+
 ## Adjusting Infrastructure (Re-enter Bootstrap)
 
 To change the Dockerfile, ports, services or allowed domains after the initial setup:
@@ -110,7 +131,7 @@ Bootstrap keeps its memory from previous sessions.
 ## Changing Language/Framework
 
 The project agent handles language installation. It will:
-1. Update `repo/.devcontainer/Dockerfile` (review the change)
+1. Update `repo/.devcontainer/Dockerfile` (`build.sh` shows you the change and asks before building it)
 2. Ask you to exit and rebuild
 
 ```bash
@@ -162,6 +183,7 @@ After completing the full setup:
     │   ├── firewall.sh      #   Re-apply the allowlist without restarting
     │   └── bootstrap.sh     #   Re-enter Bootstrap
     ├── .bootstrap-claude/   # Bootstrap's Claude Code memory, state and /login credentials
+    ├── .build-review/       # Copy of repo/.devcontainer/ from the last build (build.sh diffs against it)
     ├── .claude/settings.json  # Fallback copy of the Bootstrap permission policy
     ├── CLAUDE.md            # Bootstrap role instructions
     ├── bootstrap-manifest.md  # Bootstrap's decision log
@@ -178,7 +200,7 @@ After completing the full setup:
 
 ### Firewall
 - Applied from outside the container by a one-shot container built on the host from `templates/firewall/` (`claude-dev-firewall` image), sharing the dev container's network namespace. The dev container has no `NET_ADMIN` and never sees the firewall script, so the agent cannot disable or edit it
-- Default-deny outbound; allows the domain allowlist plus `extra_allowed_domains`, GitHub's published IP ranges, and the host's /24 network (so services on the host, such as the MCP Search Server, are reachable)
+- Default-deny outbound; allows the domain allowlist plus `extra_allowed_domains`, GitHub's published IP ranges, the host's /24 network (so services on the host, such as the MCP Search Server, are reachable), and the notes MCP network when one is configured
 - DNS only through Docker's embedded resolver; SSH only to allowlisted IPs; IPv6 blocked
 - **Limits to be aware of:** the allowlist is enforced by IP address, so other sites served from the same CDN IPs as an allowed domain are reachable too; DNS lookups through Docker's resolver can still carry data out; GitHub is fully reachable
 
@@ -190,7 +212,7 @@ After completing the full setup:
 - It has no firewall, because it needs to look up documentation (for example, users of custom base images). Web fetches ask first for that reason: a URL can carry data out
 
 ### What You Should Still Review
-- The project agent can edit `repo/.devcontainer/Dockerfile`. `build.sh` builds it with full network access, and the resulting image runs for a few seconds before `start.sh` applies the firewall. Review `.devcontainer/` changes before running `build.sh`
+- The project agent can edit `repo/.devcontainer/`. The build has full network access, and the resulting image runs for a few seconds before `start.sh` applies the firewall, so `build.sh` shows every change since the last successful build and asks before building it (`--yes` skips the question). Read that diff before answering
 - Bootstrap's permission prompts: approve `project-config.json` edits and web fetches only when you expect them
 - Treat `repo/` as untrusted on the host: the agent can write `.git/hooks/` and `.git/config`, and git runs commands from both. Use git on `repo/` inside the container, or check those files before running git on it from the host
 
