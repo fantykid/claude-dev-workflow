@@ -80,11 +80,13 @@ cdw_extra_allowed_domains() {
     printf '%s' "${domains[*]}"
 }
 
-# 以一次性容器（共用開發容器的 network namespace）套用防火牆；額外參數 --refresh 表示只刷新白名單
+# 以一次性容器（共用開發容器的 network namespace）套用防火牆
+# 額外參數：--refresh 只刷新白名單；--check 只檢查防火牆是否仍在作用中
+# --pull never：只使用 host 上從 templates/firewall/ 建置的 image，絕不從 registry 拉取同名 image
 cdw_apply_firewall() {
     local container="$1" extra_domains="$2"
     shift 2
-    docker run --rm \
+    docker run --rm --pull never \
         --user root \
         --cap-drop=ALL \
         --cap-add=NET_ADMIN \

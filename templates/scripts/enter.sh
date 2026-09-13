@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 PROJECT_DIR="{{PROJECT_DIR}}"
+REPO_DIR="{{REPO_DIR}}"
 CONTAINER="devcontainer-{{PROJECT_NAME}}"
 # 先取得清單再比對，避免 pipefail 下 grep 提早結束造成誤判
 if ! grep -qx "${CONTAINER}" <<< "$(docker ps --format '{{.Names}}')"; then
@@ -23,6 +24,19 @@ fi
 # 只接受一般的非 root 使用者名稱（與 start.sh 相同規則）
 if [[ ! "$CONTAINER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || [ "$CONTAINER_USER" = "root" ]; then
     echo "Error: project-config.json 的 container_user 不合法（需為非 root 的 Linux 使用者名稱，例如 node）"
+    exit 1
+fi
+
+# 防火牆規則存在於容器的 network namespace：容器若不是由 start.sh 啟動（例如直接 docker start/restart），規則就不存在
+if [ ! -f "${REPO_DIR}/lib/helpers.sh" ]; then
+    echo "Error: ${REPO_DIR}/lib/helpers.sh not found. Was the claude-dev-workflow repo moved or deleted?"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "${REPO_DIR}/lib/helpers.sh"
+if ! cdw_apply_firewall "${CONTAINER}" "" --check >/dev/null 2>&1; then
+    echo "Error: the firewall is not active in ${CONTAINER} (the container was probably restarted without ./scripts/start.sh)."
+    echo "Run ./scripts/start.sh to recreate it with the firewall."
     exit 1
 fi
 

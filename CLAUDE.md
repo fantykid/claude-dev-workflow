@@ -73,7 +73,7 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 ### Dev Container Isolation
 - `--cap-drop=ALL --security-opt no-new-privileges`, non-root `container_user` (sudo cannot work)
 - No `NET_ADMIN`; the firewall script is not in the dev image at all
-- `--restart no`: firewall rules live in the container's network namespace and are applied by `start.sh`
+- `--restart no`: firewall rules live in the container's network namespace, so a plain `docker restart`/`docker start` brings the container back without them (verified). `enter.sh` runs the firewall image with `--check` (allowlist ipset present and OUTPUT policy DROP) and refuses to enter an unfirewalled container. The firewall image is always run with `--pull never`
 - `project-config.json` is treated as untrusted input (Bootstrap writes it): `agent`, `container_user` (`^[a-z_][a-z0-9_-]{0,31}$`, not root), ports and `extra_allowed_domains` are validated before any container is touched; optional `docker run` arguments are passed as a bash array
 - Trust boundary: the project agent can edit `repo/.devcontainer/Dockerfile`, which takes effect on the next `build.sh` — users should review Dockerfile diffs
 

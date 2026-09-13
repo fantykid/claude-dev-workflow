@@ -6,15 +6,26 @@ IFS=$'\n\t'       # Stricter word splitting
 # 開發容器防火牆（由 host 建置的 claude-dev-firewall image 執行）
 #   init-firewall.sh            完整套用：start.sh 在容器啟動後執行
 #   init-firewall.sh --refresh  只重建白名單 ipset 並原子交換，不動 iptables 規則：scripts/firewall.sh
+#   init-firewall.sh --check    只檢查防火牆是否仍在作用中：scripts/enter.sh
 # 以 --network container:<開發容器> 共用網路命名空間，規則作用在開發容器上
 # ============================================================
 MODE="apply"
-if [ "${1:-}" = "--refresh" ]; then
-    MODE="refresh"
-elif [ -n "${1:-}" ]; then
-    echo "Usage: init-firewall.sh [--refresh]"
-    exit 1
-fi
+case "${1:-}" in
+    "") ;;
+    --refresh) MODE="refresh" ;;
+    --check)
+        # 規則存在於容器的 network namespace；容器若被 docker start/restart 直接重啟，規則就不見了
+        if ipset list -n allowed-domains >/dev/null 2>&1 && iptables -S OUTPUT 2>/dev/null | grep -qx -- '-P OUTPUT DROP'; then
+            exit 0
+        fi
+        echo "Firewall is not active in this container"
+        exit 1
+        ;;
+    *)
+        echo "Usage: init-firewall.sh [--refresh|--check]"
+        exit 1
+        ;;
+esac
 
 DOMAIN_RE='^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$'
 

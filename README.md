@@ -129,7 +129,7 @@ cd ~/projects/my-app
 ./scripts/start.sh    # Recreate it and re-apply the firewall
 ```
 
-Always restart through `start.sh`: the firewall rules live in the container's network namespace and are applied by `start.sh`.
+Always restart through `start.sh`: the firewall rules live in the container's network namespace, so a plain `docker restart` or `docker start` brings the container back without them. `enter.sh` checks for this and refuses to enter until you run `start.sh`.
 
 ## Keeping Tools Up to Date
 
