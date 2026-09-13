@@ -192,6 +192,8 @@ fi
 
 # ============================================================
 # 啟動容器（不授予 NET_ADMIN — 防火牆由外部套用，容器內無法關閉）
+# 防火牆只能在容器啟動後套用：用 --entrypoint sleep 與 --no-healthcheck 略過 image 自帶的 ENTRYPOINT / HEALTHCHECK，
+# 讓防火牆生效前只跑 sleep（Dockerfile 可被開發代理修改，改動仍需在 build 前檢查，見 README）
 # ============================================================
 docker run -d \
     --name "${CONTAINER}" \
@@ -200,12 +202,14 @@ docker run -d \
     --cap-drop=ALL \
     --security-opt no-new-privileges \
     --restart no \
+    --no-healthcheck \
+    --entrypoint sleep \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
     "${RUN_ARGS[@]}" \
     "${IMAGE}" \
-    sleep infinity
+    infinity
 
 # ============================================================
 # 驗證容器啟動成功（捕獲 port binding 失敗等問題）
@@ -234,13 +238,17 @@ fi
 echo "Initializing firewall via external container (${FIREWALL_IMAGE})..."
 if ! cdw_apply_firewall "${CONTAINER}" "${EXTRA_DOMAINS}"; then
     echo "ERROR: Firewall initialization failed."
-    echo "Stopping container for safety — do not use without firewall."
-    docker stop "${CONTAINER}" 2>/dev/null || true
+    echo "Removing container for safety — do not use without firewall."
+    docker rm -f "${CONTAINER}" 2>/dev/null || true
     exit 1
 fi
 
 # 取得 host IP（容器透過此 IP 連到 host 上的 MCP server）
+# ip 指令來自開發代理可修改的 image，輸出不可信：只接受 IPv4 格式，避免奇怪的輸出被寫進設定或印到終端機
 HOST_IP=$(docker exec "${CONTAINER}" sh -c "ip route | grep default | cut -d' ' -f3" || true)
+if [[ ! "$HOST_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    HOST_IP=""
+fi
 
 # ============================================================
 # MCP Search Server：先確認可用，再依 agent 寫入對應格式

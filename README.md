@@ -125,11 +125,11 @@ cd ~/projects/my-app
 
 ```bash
 cd ~/projects/my-app
-./scripts/stop.sh     # Stop the container
+./scripts/stop.sh     # Stop and remove the container
 ./scripts/start.sh    # Recreate it and re-apply the firewall
 ```
 
-Always restart through `start.sh`: the firewall rules live in the container's network namespace, so a plain `docker restart` or `docker start` brings the container back without them. `enter.sh` checks for this and refuses to enter until you run `start.sh`.
+Always restart through `start.sh`: the firewall rules live in the container's network namespace, so a plain `docker restart` brings the container back without them. `stop.sh` removes the container so it can't be started again without the firewall (for example from VS Code's container list), and `enter.sh` refuses to enter a container whose firewall is gone.
 
 ## Keeping Tools Up to Date
 
@@ -158,10 +158,10 @@ After completing the full setup:
     │   ├── build.sh         #   Build the dev container image
     │   ├── start.sh         #   Start the container + firewall
     │   ├── enter.sh         #   Enter the running container
-    │   ├── stop.sh          #   Stop the container
+    │   ├── stop.sh          #   Stop and remove the container
     │   ├── firewall.sh      #   Re-apply the allowlist without restarting
     │   └── bootstrap.sh     #   Re-enter Bootstrap
-    ├── .bootstrap-claude/   # Bootstrap's Claude Code memory and state
+    ├── .bootstrap-claude/   # Bootstrap's Claude Code memory, state and /login credentials
     ├── .claude/settings.json  # Fallback copy of the Bootstrap permission policy
     ├── CLAUDE.md            # Bootstrap role instructions
     ├── bootstrap-manifest.md  # Bootstrap's decision log
@@ -183,13 +183,16 @@ After completing the full setup:
 - **Limits to be aware of:** the allowlist is enforced by IP address, so other sites served from the same CDN IPs as an allowed domain are reachable too; DNS lookups through Docker's resolver can still carry data out; GitHub is fully reachable
 
 ### Bootstrap Container
-- Its permission policy is baked into the image as Claude Code managed settings, which project, local and user settings cannot override: it may read files, search the web and edit only `repo/`, `project-config.json` and `bootstrap-manifest.md`; bypass and auto permission modes are disabled
-- `scripts/`, `templates/` and `.claude/` are mounted read-only; `secrets/`, `claude-data/` and `codex-data/` are hidden
+- Its permission policy is baked into the image as Claude Code managed settings, which project, local and user settings cannot override. Without asking, it may read files in the project directory, search the web, and edit `repo/` and `bootstrap-manifest.md`. It asks you before it edits `project-config.json` (which controls the firewall allowlist), writes `repo/.devcontainer/` or `repo/.claude/`, fetches a web page, or runs other commands. Bypass and auto permission modes are disabled
+- It cannot read outside the project directory without asking, which keeps the mounted token file out of reach; `secrets/`, `claude-data/`, `codex-data/` and `.bootstrap-claude/` are hidden from it
+- `scripts/`, `templates/` and `.claude/` are mounted read-only
 - Runs with `--cap-drop=ALL` and `no-new-privileges`; the OAuth token is mounted as a read-only file (not visible in `docker inspect`)
-- It has no firewall, because it needs to look up documentation (for example, users of custom base images)
+- It has no firewall, because it needs to look up documentation (for example, users of custom base images). Web fetches ask first for that reason: a URL can carry data out
 
 ### What You Should Still Review
-- The project agent can edit `repo/.devcontainer/Dockerfile`. Review Dockerfile changes before running `build.sh`
+- The project agent can edit `repo/.devcontainer/Dockerfile`. `build.sh` builds it with full network access, and the resulting image runs for a few seconds before `start.sh` applies the firewall. Review `.devcontainer/` changes before running `build.sh`
+- Bootstrap's permission prompts: approve `project-config.json` edits and web fetches only when you expect them
+- Treat `repo/` as untrusted on the host: the agent can write `.git/hooks/` and `.git/config`, and git runs commands from both. Use git on `repo/` inside the container, or check those files before running git on it from the host
 
 ## Notes
 

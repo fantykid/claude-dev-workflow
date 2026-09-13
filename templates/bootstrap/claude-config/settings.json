@@ -5,14 +5,11 @@
       "Glob",
       "Grep",
       "WebSearch",
-      "WebFetch",
       "Edit(//workspace/repo/**)",
-      "Edit(//workspace/project-config.json)",
       "Edit(//workspace/bootstrap-manifest.md)",
       "Bash(printenv PROJECT_NAME)",
       "Bash(printenv HOST_PROJECT_DIR)",
-      "Bash(date)",
-      "Bash(date *)"
+      "Bash(date)"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -29,8 +26,13 @@
       "Edit(//workspace/.claude/**)",
       "Read(//workspace/secrets/**)",
       "Read(//workspace/claude-data/**)",
-      "Read(//workspace/codex-data/**)"
+      "Read(//workspace/codex-data/**)",
+      "Read(//workspace/.bootstrap-claude/**)",
+      "Read(//home/node/.claude/.credentials.json)",
+      "Read(//run/secrets/**)",
+      "Read(//proc/**)"
     ],
+    "blockReadsOutsideWorkingDirectories": true,
     "disableAutoMode": "disable",
     "disableBypassPermissionsMode": "disable"
   }

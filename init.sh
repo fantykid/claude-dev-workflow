@@ -69,7 +69,7 @@ echo ""
 # 建立目錄結構
 # ============================================================
 mkdir -p "$PROJECT_DIR"
-mkdir -p "$PROJECT_DIR/.bootstrap-claude"       # Bootstrap 的 Claude 記憶與狀態（持久化用）
+mkdir -p -m 700 "$PROJECT_DIR/.bootstrap-claude" # Bootstrap 的 Claude 記憶與狀態（持久化用；/login 後也存放登入憑證）
 mkdir -p "$PROJECT_DIR/.claude"                  # Bootstrap 的備援權限設定（容器內唯讀）
 mkdir -p "$PROJECT_DIR/scripts"                  # Host 管理腳本
 mkdir -p "$PROJECT_DIR/data"                     # 持久資料
@@ -115,11 +115,12 @@ echo ""
 # - /workspace = 專案目錄；scripts/、templates/、.claude/ 以 :ro 掛載
 # - secrets/、claude-data/ 等含憑證的目錄以 tmpfs 遮蔽，Bootstrap 看不到內容
 #   （只遮蔽已存在的目錄，避免 Docker 以 root 在 host 建立空目錄）
+# - .bootstrap-claude/ 也從 /workspace 遮蔽（/login 的憑證存在裡面）；Claude Code 仍透過 /home/node/.claude 使用它
 # - OAuth token 以唯讀檔案掛載，由 image 的 entrypoint 載入（不出現在 docker inspect）
 # - /home/node/.claude = Bootstrap 記憶持久化
 # - PROJECT_NAME 和 HOST_PROJECT_DIR 透過環境變數傳入
 MASK_ARGS=()
-for dir in secrets claude-data codex-data gstack-data; do
+for dir in secrets claude-data codex-data gstack-data .bootstrap-claude; do
     if [ -d "${PROJECT_DIR}/${dir}" ]; then
         MASK_ARGS+=(--mount "type=tmpfs,destination=/workspace/${dir},tmpfs-size=1m,tmpfs-mode=0500")
     fi

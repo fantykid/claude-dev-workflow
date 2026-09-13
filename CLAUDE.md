@@ -38,7 +38,7 @@ claude-dev-workflow/          ← THIS REPO (tool)
     │   ├── build.sh          ← Build dev container image
     │   ├── start.sh          ← Validate config, start container, apply firewall, MCP/GPU/ports
     │   ├── enter.sh          ← Enter running container (login shell)
-    │   ├── stop.sh           ← Stop container
+    │   ├── stop.sh           ← Stop and remove container (a stopped container would restart without the firewall)
     │   ├── firewall.sh       ← Re-apply the allowlist to a running container
     │   └── bootstrap.sh      ← Re-enter Bootstrap
     └── gitignore             ← .gitignore template for generated projects
@@ -100,9 +100,11 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 
 ### Bootstrap Confinement
 - Policy = Claude Code **managed settings** in the image (`/etc/claude-code/managed-settings.json`, root-owned): `allowManagedPermissionRulesOnly`, `permissions.disableAutoMode`, `permissions.disableBypassPermissionsMode`, `strictPluginOnlyCustomization: true`
-- Allowed without prompting: Read/Glob/Grep, WebSearch/WebFetch, `Edit(//workspace/repo/**)`, `Edit(//workspace/project-config.json)`, `Edit(//workspace/bootstrap-manifest.md)`; writes under `repo/.devcontainer/` and `repo/.claude/` still prompt (protected paths)
+- Allowed without prompting: Read/Glob/Grep inside `/workspace`, WebSearch, `Edit(//workspace/repo/**)`, `Edit(//workspace/bootstrap-manifest.md)`, and the exact commands `printenv PROJECT_NAME`, `printenv HOST_PROJECT_DIR`, `date` (never `Bash(date *)`: `date -f FILE` prints any file)
+- Prompts: editing `project-config.json` (its `extra_allowed_domains` widens the dev container firewall), writes under `repo/.devcontainer/` and `repo/.claude/` (protected paths), WebFetch (Bootstrap has no firewall, so a fetched URL can carry data out), other Bash commands
+- `permissions.blockReadsOutsideWorkingDirectories: true` stops the file tools and Claude Code's built-in read-only Bash commands (`cat`, `ls`, `grep`, …) from reading outside `/workspace` without a prompt; `Read` deny rules also cover `/run/secrets/`, `/proc/`, the credential directories, and symlinks that point at them
 - `/init-project` is a managed skill (`/etc/claude-code/.claude/skills/init-project/`)
-- Mounts: `scripts/`, `templates/`, `.claude/` read-only; `secrets/`, `claude-data/`, `codex-data/`, `gstack-data/` hidden with tmpfs (only when they exist)
+- Mounts: `scripts/`, `templates/`, `.claude/` read-only; `secrets/`, `claude-data/`, `codex-data/`, `gstack-data/`, `.bootstrap-claude/` hidden from `/workspace` with tmpfs (only when they exist; `.bootstrap-claude/` stays mounted at `/home/node/.claude`, where `/login` keeps its credentials)
 - `--cap-drop=ALL --security-opt no-new-privileges`; no firewall (Bootstrap needs web documentation)
 - `ensure_bootstrap_image` rebuilds the image when npm has a newer Claude Code or `templates/bootstrap/` changed, and refuses to use an old image without the policy
 
@@ -111,6 +113,8 @@ This project is **public on GitHub**. Security is the top priority, balanced wit
 - The firewall allowlists IP addresses: other sites on the same CDN IPs as an allowed domain are reachable (verified with Cloudflare). A domain/SNI-filtering egress proxy would close this
 - DNS queries through Docker's embedded resolver can still carry data out
 - The Bootstrap container has unrestricted network access
+- The project agent can edit `repo/.devcontainer/Dockerfile`. `build.sh` builds it with unrestricted network access, and the container runs for a few seconds before `start.sh` applies the firewall: `start.sh` skips the image's ENTRYPOINT and HEALTHCHECK, but a modified image can still run code then (for example by replacing `sleep`). Review `.devcontainer/` changes before rebuilding
+- `repo/.git/` is writable by the project agent, and git on the host runs hooks and config commands from it (for example `core.fsmonitor`)
 - Existing projects keep their old scripts and Dockerfile. Projects whose `repo/.devcontainer/init-firewall.sh` still treats a failed DNS lookup as fatal now abort on `start.sh`, because `statsig.anthropic.com` no longer resolves — remove that domain from the project's script and rebuild
 - Node.js 22 reaches end of life on 2027-04-30; bump both base images before then
 - VS Code "Attach to Running Container" downloading its server inside the firewalled container is not covered by automated tests
