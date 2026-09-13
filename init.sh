@@ -112,7 +112,7 @@ echo ""
 # - scripts/ 以 :ro 覆蓋掛載（Bootstrap 無法修改）
 # - templates/ 從 repo 掛載為 :ro（不再複製到專案內）
 # - settings.json 和 commands/ 以 :ro 個別掛載（保護權限設定，不阻擋 .claude/ 其餘寫入）
-# - OAuth token 透過檔案掛載傳入（不暴露在環境變數）
+# - OAuth token 目前仍以環境變數傳入（已知問題：docker inspect 看得到，見 CLAUDE.md Known Issues）
 # - PROJECT_NAME 和 HOST_PROJECT_DIR 透過環境變數傳入
 docker rm -f "bootstrap-${PROJECT_NAME}" 2>/dev/null || true
 docker run -it --rm \
@@ -136,37 +136,12 @@ echo ""
 echo "================================================"
 echo "✓ Bootstrap session ended"
 
-# ============================================================
-# Port 預檢（提前警告，最終檢查由 start.sh 負責）
-# ============================================================
-CONFIG_FILE="${PROJECT_DIR}/project-config.json"
-if [ -f "$CONFIG_FILE" ]; then
-    PORTS=$(tr -d '\n\r\t' < "$CONFIG_FILE" | grep -oP '"ports"\s*:\s*\[\K[^\]]*' 2>/dev/null | tr -d ' "' | tr ',' '\n' || true)
-    PORT_CONFLICTS=""
-    for port in $PORTS; do
-        if [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ]; then
-            if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
-                PORT_CONFLICTS="${PORT_CONFLICTS}  - Port ${port} is currently in use
-"
-            fi
-        fi
-    done
-    if [ -n "$PORT_CONFLICTS" ]; then
-        echo ""
-        echo "WARNING: Port conflict detected:"
-        printf '%s' "$PORT_CONFLICTS"
-        echo "start.sh will automatically find available ports."
-        echo "Or edit ${PROJECT_DIR}/project-config.json to change manually."
-        echo ""
-    fi
-fi
-
 echo ""
 echo "Next steps:"
 echo "  1. cd ${PROJECT_DIR}"
 echo "  2. ./scripts/build.sh   (build dev container image)"
 echo "  3. ./scripts/start.sh   (start container)"
 echo "  4. ./scripts/enter.sh   (enter container)"
-echo "  5. claude --dangerously-skip-permissions  (start developing)"
+echo "  5. claude --dangerously-skip-permissions   (or: codex, if agent is codex)"
 echo ""
 echo "To re-enter Bootstrap later: ./scripts/bootstrap.sh"

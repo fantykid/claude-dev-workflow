@@ -2,7 +2,8 @@
 set -euo pipefail
 PROJECT_DIR="{{PROJECT_DIR}}"
 CONTAINER="devcontainer-{{PROJECT_NAME}}"
-if ! docker ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
+# 先取得清單再比對，避免 pipefail 下 grep 提早結束造成誤判
+if ! grep -qx "${CONTAINER}" <<< "$(docker ps --format '{{.Names}}')"; then
     echo "Container not running. Run ./scripts/start.sh first."
     exit 1
 fi
@@ -19,10 +20,17 @@ if [ -f "$CONFIG_FILE" ] && command -v jq &>/dev/null; then
     [ -n "$_agent" ] && AGENT="$_agent"
 fi
 
+# 只接受一般的非 root 使用者名稱（與 start.sh 相同規則）
+if [[ ! "$CONTAINER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || [ "$CONTAINER_USER" = "root" ]; then
+    echo "Error: project-config.json 的 container_user 不合法（需為非 root 的 Linux 使用者名稱，例如 node）"
+    exit 1
+fi
+
 if [ "$AGENT" = "codex" ]; then
     echo "Entering container. Run 'codex' to start developing."
     if [ ! -f "${PROJECT_DIR}/codex-data/auth.json" ]; then
-        echo "（首次使用先在容器內執行 'codex login' 完成登入；登入狀態會持久化於 codex-data）"
+        echo "（首次使用：在容器內執行 'codex login --device-auth'，需先在 ChatGPT 安全設定中啟用裝置碼登入；"
+        echo "  或把已登入電腦上的 ~/.codex/auth.json 複製到 ${PROJECT_DIR}/codex-data/auth.json）"
     fi
 else
     echo "Entering container. Run 'claude --dangerously-skip-permissions' to start developing."

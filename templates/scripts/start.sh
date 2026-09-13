@@ -15,12 +15,32 @@ fi
 CONFIG_FILE="${PROJECT_DIR}/project-config.json"
 
 # ============================================================
-# Agent 選擇（claude | codex）— 決定認證、持久化、MCP 設定方式
+# 讀取並驗證 project-config.json
+# 此檔由 Bootstrap 產生，視為不可信輸入；所有驗證都在移除舊容器之前完成
 # ============================================================
 AGENT="claude"
+CONTAINER_USER="node"
 if [ -f "$CONFIG_FILE" ]; then
     _agent=$(jq -r '.agent // "claude"' "$CONFIG_FILE" 2>/dev/null || echo "claude")
     [ -n "$_agent" ] && AGENT="$_agent"
+    _user=$(jq -r '.container_user // empty' "$CONFIG_FILE" 2>/dev/null || true)
+    [ -n "$_user" ] && CONTAINER_USER="$_user"
+fi
+
+if [ "$AGENT" != "claude" ] && [ "$AGENT" != "codex" ]; then
+    echo "Error: project-config.json 的 agent 必須是 \"claude\" 或 \"codex\""
+    exit 1
+fi
+
+# container_user 會出現在 docker 參數與容器內的 shell 指令中，只接受一般的非 root 使用者名稱
+if [[ ! "$CONTAINER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || [ "$CONTAINER_USER" = "root" ]; then
+    echo "Error: project-config.json 的 container_user 不合法（需為非 root 的 Linux 使用者名稱，例如 node）"
+    exit 1
+fi
+CONTAINER_HOME="/home/${CONTAINER_USER}"
+
+if [ -f "$CONFIG_FILE" ] && [ "$(jq -r '.gstack // false' "$CONFIG_FILE" 2>/dev/null || echo false)" = "true" ]; then
+    echo "WARNING: gstack 支援已移除，project-config.json 的 gstack 設定會被忽略"
 fi
 
 # ============================================================
@@ -43,16 +63,26 @@ if [ "$AGENT" = "claude" ]; then
 fi
 
 # ============================================================
-# 從 project-config.json 讀取 port 設定（純資料，非 Bootstrap 產生的代碼）
+# 建立 network，並移除舊容器
+# 必須在掃描 port 之前移除：舊容器還在時仍占用 port，重跑 start.sh 會分配到下一個 port
 # ============================================================
-PORT_ARGS=""
-PORT_ENV=""
+docker network create "net-${PROJECT_NAME}" 2>/dev/null || true
+docker rm -f "${CONTAINER}" 2>/dev/null || true
+
+# docker run 的額外參數一律放進陣列，避免設定值中的空白被拆成額外參數
+RUN_ARGS=()
+
+# ============================================================
+# 從 project-config.json 讀取 port 設定（純資料，非 Bootstrap 產生的代碼）
+# 設定中的 port 數字只決定需要幾個 port；實際 port 從專用範圍分配，並以 PORT / PORT_n 傳入容器
+# ============================================================
 PORT_SUMMARY=""
 # 專案容器可用 port 範圍（避開常見服務 port）
 PORT_MIN=10000
 PORT_MAX=19999
 PORT_INDEX=0
 MAX_PORTS=20
+FIRST_PORT=""
 
 if [ -f "$CONFIG_FILE" ]; then
     # 使用 jq 安全解析 JSON（避免 grep 注入風險）
@@ -76,72 +106,53 @@ if [ -f "$CONFIG_FILE" ]; then
             # 下次從此 port 之後開始找（避免多 port 時分配到同一個）
             PORT_MIN=$((actual_port + 1))
             # host 和 container 使用同一個 port（方便本機存取）
-            PORT_ARGS="${PORT_ARGS} -p ${actual_port}:${actual_port}"
-            PORT_ENV="${PORT_ENV} -e PORT_${PORT_INDEX}=${actual_port}"
+            RUN_ARGS+=(-p "${actual_port}:${actual_port}" -e "PORT_${PORT_INDEX}=${actual_port}")
+            if [ -z "$FIRST_PORT" ]; then
+                FIRST_PORT="$actual_port"
+            fi
             PORT_SUMMARY="${PORT_SUMMARY}  - ${actual_port}
 "
             PORT_INDEX=$((PORT_INDEX + 1))
         fi
     done
     # 設定主 port 環境變數（容器內 $PORT 即可取得）
-    if [ "$PORT_INDEX" -gt 0 ]; then
-        FIRST_PORT=$(printf '%s' "$PORT_SUMMARY" | head -1 | grep -o '[0-9]\+')
-        PORT_ENV="${PORT_ENV} -e PORT=${FIRST_PORT}"
+    if [ -n "$FIRST_PORT" ]; then
+        RUN_ARGS+=(-e "PORT=${FIRST_PORT}")
     fi
 fi
-
-# 建立 network（如不存在）
-docker network create "net-${PROJECT_NAME}" 2>/dev/null || true
-
-# 移除舊容器（如存在）
-docker rm -f "${CONTAINER}" 2>/dev/null || true
-
-# 容器使用者（預設 node，可在 project-config.json 中覆寫）
-CONTAINER_USER="node"
-if [ -f "$CONFIG_FILE" ]; then
-    _user=$(jq -r '.container_user // empty' "$CONFIG_FILE" 2>/dev/null || true)
-    [ -n "$_user" ] && CONTAINER_USER="$_user"
-fi
-CONTAINER_HOME="/home/${CONTAINER_USER}"
 
 # ============================================================
 # 準備 agent 持久化目錄（session + 登入狀態，每個專案必備）
 #   claude → claude-data 掛載為 ~/.claude
 #   codex  → codex-data  掛載為 ~/.codex（login state auth.json + config.toml）
 # ============================================================
-AGENT_MOUNT=""
 if [ "$AGENT" = "codex" ]; then
     mkdir -p -m 700 "${PROJECT_DIR}/codex-data"
-    AGENT_MOUNT="-v ${PROJECT_DIR}/codex-data:${CONTAINER_HOME}/.codex"
-    # Codex 登入：在容器內自行執行 `codex login` 即可；登入狀態持久化於 codex-data（掛載為 ~/.codex）。
+    RUN_ARGS+=(-v "${PROJECT_DIR}/codex-data:${CONTAINER_HOME}/.codex")
 else
     mkdir -p -m 700 "${PROJECT_DIR}/claude-data"
     if [ ! -f "${PROJECT_DIR}/claude-data/settings.json" ]; then
         echo '{"model":"opus"}' > "${PROJECT_DIR}/claude-data/settings.json"
     fi
-    AGENT_MOUNT="-v ${PROJECT_DIR}/claude-data:${CONTAINER_HOME}/.claude"
+    RUN_ARGS+=(-v "${PROJECT_DIR}/claude-data:${CONTAINER_HOME}/.claude")
+    # .claude.json（專案信任、個人 MCP 等狀態）預設存在 ~/.claude 之外，容器每次重建都會遺失；
+    # 設定 CLAUDE_CONFIG_DIR 讓它存進上面的持久化目錄
+    RUN_ARGS+=(-e "CLAUDE_CONFIG_DIR=${CONTAINER_HOME}/.claude")
 fi
 
-# gstack 持久化（僅在啟用 gstack 時）
-GSTACK_ENABLED="false"
+# project-config.json 以唯讀掛入，讓容器內的開發代理能查看設定（ports、extra_allowed_domains 等），但無法修改
 if [ -f "$CONFIG_FILE" ]; then
-    GSTACK_ENABLED=$(jq -r '.gstack // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
-fi
-GSTACK_MOUNT=""
-if [ "$GSTACK_ENABLED" = "true" ]; then
-    mkdir -p -m 700 "${PROJECT_DIR}/gstack-data"
-    GSTACK_MOUNT="-v ${PROJECT_DIR}/gstack-data:${CONTAINER_HOME}/.gstack"
+    RUN_ARGS+=(-v "${CONFIG_FILE}:/project-config.json:ro")
 fi
 
 # GPU 支援（需要 host 已安裝 nvidia-container-toolkit）
-GPU_FLAG=""
 GPU_ENABLED="false"
 if [ -f "$CONFIG_FILE" ]; then
     GPU_ENABLED=$(jq -r '.gpu // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
 fi
 if [ "$GPU_ENABLED" = "true" ]; then
     if command -v nvidia-smi &>/dev/null; then
-        GPU_FLAG="--gpus all"
+        RUN_ARGS+=(--gpus all)
         echo "GPU support enabled."
     else
         echo "WARNING: gpu=true in config but nvidia-smi not found on host. Skipping GPU."
@@ -166,13 +177,10 @@ docker run -d \
     --cap-drop=ALL \
     --security-opt no-new-privileges \
     --restart no \
-    ${GPU_FLAG} \
-    ${PORT_ARGS} ${PORT_ENV} \
     -v "${PROJECT_DIR}/repo:/workspace" \
     -v "${PROJECT_DIR}/data:/data" \
     -v "${PROJECT_DIR}/secrets:/secrets:ro" \
-    ${AGENT_MOUNT} \
-    ${GSTACK_MOUNT} \
+    "${RUN_ARGS[@]}" \
     "${IMAGE}" \
     sleep infinity
 
@@ -219,12 +227,31 @@ fi
 HOST_IP=$(docker exec "${CONTAINER}" sh -c "ip route | grep default | cut -d' ' -f3" || true)
 
 # ============================================================
-# MCP 設定（base）
-#   codex  → 寫入 ~/.codex/config.toml（預設設定 + 選用的 search；筆記 MCP 於下方追加）
-#   claude → 寫入 /workspace/.mcp.json（search；筆記 MCP 於下方合併）
+# MCP Search Server：先確認可用，再依 agent 寫入對應格式
+#   codex  → ~/.codex/config.toml（每次 start 覆寫；筆記 MCP 於下方追加）
+#   claude → /workspace/.mcp.json（筆記 MCP 於下方合併）
 # ============================================================
-MCP_SEARCH=$(jq -r '.mcp_search // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+MCP_SEARCH="false"
+if [ -f "$CONFIG_FILE" ]; then
+    MCP_SEARCH=$(jq -r '.mcp_search // false' "$CONFIG_FILE" 2>/dev/null || echo "false")
+fi
 MCP_SEARCH_PORT_VAL="${MCP_SEARCH_PORT:-9100}"
+SEARCH_URL=""
+
+if [ "$MCP_SEARCH" = "true" ]; then
+    if [ -z "$(docker ps -q -f "name=claude-mcp-search")" ]; then
+        echo ""
+        echo "WARNING: MCP Search Server (claude-mcp-search) is not running."
+        echo "Search capability will not be available."
+        echo "Start it with: docker run -d --name claude-mcp-search -p ${MCP_SEARCH_PORT_VAL}:9100 claude-mcp-search:latest"
+    elif [ -z "$HOST_IP" ]; then
+        echo "WARNING: Could not detect host IP for MCP connection."
+    elif docker exec "${CONTAINER}" sh -c "curl -sf --connect-timeout 3 http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}/health >/dev/null 2>&1"; then
+        SEARCH_URL="http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}/mcp"
+    else
+        echo "WARNING: MCP Search Server is running but not reachable at http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}"
+    fi
+fi
 
 if [ "$AGENT" = "codex" ]; then
     # ---- 組出 config.toml（每次 start 覆寫；登入狀態在 auth.json，不受影響）----
@@ -235,41 +262,30 @@ if [ "$AGENT" = "codex" ]; then
 approval_policy = \"never\"
 sandbox_mode = \"danger-full-access\"
 "
-    if [ "$MCP_SEARCH" = "true" ] && docker ps -q -f "name=claude-mcp-search" | grep -q . && [ -n "$HOST_IP" ]; then
+    if [ -n "$SEARCH_URL" ]; then
         CODEX_TOML="${CODEX_TOML}
 [mcp_servers.search]
-url = \"http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}/mcp\"
+url = \"${SEARCH_URL}\"
 "
     fi
 
     # 寫入容器內 ~/.codex/config.toml（以容器使用者身分，確保擁有權正確；ai-note-live 於下方 notes 區塊追加）
     printf '%s' "$CODEX_TOML" | docker exec -i -u "${CONTAINER_USER}" "${CONTAINER}" sh -c "cat > ${CONTAINER_HOME}/.codex/config.toml"
 elif [ "$MCP_SEARCH" = "true" ]; then
-    # ---- Claude Code：沿用 .mcp.json ----
-    if ! docker ps -q -f "name=claude-mcp-search" | grep -q .; then
-        echo ""
-        echo "WARNING: MCP Search Server (claude-mcp-search) is not running."
-        echo "Search capability will not be available."
-        echo "Start it with: docker run -d --name claude-mcp-search -p ${MCP_SEARCH_PORT_VAL}:9100 claude-mcp-search:latest"
-    elif [ -n "$HOST_IP" ]; then
-        docker exec "${CONTAINER}" sh -c "cat > /workspace/.mcp.json << MCPEOF
+    # ---- Claude Code：沿用 .mcp.json（由 start.sh 管理，已列入 .gitignore）----
+    if [ -n "$SEARCH_URL" ]; then
+        docker exec -u "${CONTAINER_USER}" "${CONTAINER}" sh -c "cat > /workspace/.mcp.json << MCPEOF
 {
   \"mcpServers\": {
     \"search\": {
       \"type\": \"http\",
-      \"url\": \"http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}/mcp\"
+      \"url\": \"${SEARCH_URL}\"
     }
   }
 }
 MCPEOF"
-        if docker exec "${CONTAINER}" sh -c "curl -sf --connect-timeout 3 http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}/health >/dev/null 2>&1"; then
-            MCP_CONFIGURED="true"
-        else
-            echo "WARNING: MCP Search Server is running but not reachable at http://${HOST_IP}:${MCP_SEARCH_PORT_VAL}"
-            docker exec "${CONTAINER}" rm -f /workspace/.mcp.json
-        fi
     else
-        echo "WARNING: Could not detect host IP for MCP connection."
+        docker exec "${CONTAINER}" rm -f /workspace/.mcp.json
     fi
 fi
 
@@ -278,7 +294,8 @@ fi
 # 依 /srv/data/projects/ai-note/repo/docs/mcp-access-recipe.md（authoritative）
 # 預設開啟；某專案不接就在 project-config.json 設 "notes_mcp": false
 # ============================================================
-NOTES_MCP=$(jq -r '.notes_mcp // true' "$CONFIG_FILE" 2>/dev/null || echo "true")
+# 注意：不能用 `.notes_mcp // true`，jq 的 // 會把 false 當成「沒有值」而回傳 true
+NOTES_MCP=$(jq -r 'if (.notes_mcp == false or .notes_mcp == "false") then "false" else "true" end' "$CONFIG_FILE" 2>/dev/null || echo "true")
 NOTES_URL="http://ainote-mcp:47823/mcp"
 NOTES_CONFIGURED=""
 if [ "$NOTES_MCP" = "true" ]; then
@@ -348,13 +365,17 @@ if [ "${NOTES_CONFIGURED:-}" = "true" ]; then
 elif [ "${NOTES_MCP:-true}" = "true" ]; then
     echo "• Notes MCP: 設定已嘗試寫入，但未驗證成功（見上方 WARNING）"
 fi
-if [ "${MCP_CONFIGURED:-}" = "true" ]; then
-    echo "✓ MCP Search enabled (http://${HOST_IP}:${MCP_SEARCH_PORT_VAL})"
+if [ -n "$SEARCH_URL" ]; then
+    echo "✓ MCP Search enabled (${SEARCH_URL})"
 fi
 echo ""
 echo "Next: ./scripts/enter.sh"
 if [ "$AGENT" = "codex" ]; then
-    echo "Then: codex   (首次在容器內執行 'codex login' 完成 ChatGPT 登入；登入狀態持久化於 codex-data)"
+    echo "Then: codex"
+    if [ ! -f "${PROJECT_DIR}/codex-data/auth.json" ]; then
+        echo "      首次使用請先在容器內執行 'codex login --device-auth'（需先在 ChatGPT 安全設定中啟用裝置碼登入），"
+        echo "      或把已登入電腦上的 ~/.codex/auth.json 複製到 ${PROJECT_DIR}/codex-data/auth.json"
+    fi
 else
     echo "Then: claude --dangerously-skip-permissions"
 fi
