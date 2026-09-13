@@ -78,11 +78,18 @@ while read -r cidr; do
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | (aggregate -q 2>/dev/null || sort -u))
 
 # Resolve and add other allowed domains
-# - Claude Code infrastructure: anthropic, sentry, statsig
+# - Claude Code infrastructure: anthropic, sentry, statsig（agent=claude 需要；codex 專案用不到但非致命）
+# - Codex / OpenAI infrastructure: API + ChatGPT 訂閱登入 (device auth) + codex backend
 # - Package registries: npm, pip, go, cargo
 # - IDE: VS Code marketplace and updates
+# 注意：單一網域解析失敗只警告、跳過（非致命）——避免某個 telemetry/CDN 網域暫時解不出就把整個防火牆弄壞。
+# （Bootstrap 可視 agent 調整此清單；預設保留 union，靠「非致命」讓不相干的網域即使解不出也不影響。）
 for domain in \
     "registry.npmjs.org" \
+    "api.openai.com" \
+    "auth.openai.com" \
+    "chatgpt.com" \
+    "openai.com" \
     "api.anthropic.com" \
     "sentry.io" \
     "statsig.anthropic.com" \
@@ -97,10 +104,10 @@ for domain in \
     "crates.io" \
     "static.crates.io"; do
     echo "Resolving $domain..."
-    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
+    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}' || true)
     if [ -z "$ips" ]; then
-        echo "ERROR: Failed to resolve $domain"
-        exit 1
+        echo "WARNING: Failed to resolve $domain — skipping (non-fatal)"
+        continue
     fi
 
     while read -r ip; do
@@ -124,6 +131,7 @@ HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
 echo "Host network detected as: $HOST_NETWORK"
 
 # Set up remaining iptables rules
+# 允許整個 host 網段（容器透過此網段連到 host 服務）
 iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
 iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
 
@@ -138,6 +146,10 @@ iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
 # Then allow only specific outbound traffic to allowed domains
 iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+
+# OPTIONAL（mcp-access）：允許連到同機筆記 MCP 的內部網路（172.30.0.0/24）。
+# 未建立該網路 / 未 attach 時此規則無害（該網段不存在）。回應走 ESTABLISHED，故只需 OUTPUT。
+iptables -A OUTPUT -d 172.30.0.0/24 -j ACCEPT
 
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited

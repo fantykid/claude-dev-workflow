@@ -1,7 +1,5 @@
 FROM node:20
 
-ARG CLAUDE_CODE_VERSION=latest
-
 # 基礎工具 + 防火牆工具（對齊官方 devcontainer）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     less git procps sudo fzf zsh man-db gnupg2 gh \
@@ -21,9 +19,9 @@ ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 ENV DEVCONTAINER=true
 
-# 建立工作目錄和 Claude config 目錄
-RUN mkdir -p /workspace /home/node/.claude && \
-    chown -R node:node /workspace /home/node/.claude
+# 建立工作目錄和 agent config 目錄（.claude 供 Claude Code；.codex 供 Codex）
+RUN mkdir -p /workspace /home/node/.claude /home/node/.codex && \
+    chown -R node:node /workspace /home/node/.claude /home/node/.codex
 
 # tmux 預設設定（滑鼠支援 + 基本配置）
 RUN echo 'set -g mouse on' > /home/node/.tmux.conf && \
@@ -37,12 +35,8 @@ USER node
 # ── 以下每次 build 都重新執行（拉最新版）──
 ARG CACHEBUST_TOOLS=0
 
-# 安裝 Claude Code（對齊官方）
-# 最低版本要求：v2.1.59（auto-memory）、v2.0.64（.claude/rules/）
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
-    && INSTALLED_VER=$(claude --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) \
-    && echo "Installed Claude Code: ${INSTALLED_VER}" \
-    && node -e "const v=process.argv[1].split('.').map(Number); const min=[2,1,59]; const ok = v[0]>min[0] || (v[0]===min[0] && (v[1]>min[1] || (v[1]===min[1] && v[2]>=min[2]))); if(!ok){console.error('ERROR: Claude Code '+process.argv[1]+' < 2.1.59 (auto-memory required)');process.exit(1)}" "${INSTALLED_VER}"
+# === Agent 安裝：Bootstrap 依 project-config.json 的 agent 欄位填入此處 ===
+# {{AGENT_INSTALL}}
 
 # === Bootstrap 會根據是否啟用 gstack 在此加入 gstack 安裝 ===
 # {{GSTACK_INSTALL}}

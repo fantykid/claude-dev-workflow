@@ -18,6 +18,11 @@ build/
 id_rsa
 id_ed25519
 
+# MCP 設定（可能含 Bearer token；由 start.sh 於執行時寫入）
+.mcp.json
+# Codex 設定 / 登入狀態（持久化於 host codex-data/）
+.codex/
+
 # Claude Code（保留 skills/ 和 rules/ 以持久化專案知識）
 .claude/settings.json
 .claude/settings.local.json
