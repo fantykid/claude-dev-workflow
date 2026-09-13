@@ -1,7 +1,6 @@
 ---
 name: create-skill
 description: 將重複性的工作流程封裝為新的 skill。當使用者說「把這個流程存起來」「建立一個指令」時使用。
-disable-model-invocation: true
 ---
 
 為當前專案建立新的可重複使用 skill：

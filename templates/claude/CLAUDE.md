@@ -7,13 +7,15 @@
 - 工作目錄：/workspace（host 的 repo/ 掛載而來）
 - 持久資料：/data（跨容器重啟保留）
 - 密鑰：/secrets（唯讀，從中讀取 API key 等）
-- 使用者：node（防火牆腳本有限 sudo 權限）
-- 網路：出站受防火牆限制，僅允許 Claude API/npm/GitHub 等白名單域名
-- 搜尋：若專案啟用了 MCP Search（見 project-config.json 的 `mcp_search` 欄位），可使用以下 MCP 工具（容器本身不直接連網，搜尋透過 host 上的 MCP Search Server 代理）：
+- 專案設定：/project-config.json（唯讀；language/framework、ports、extra_allowed_domains 等要修改時，請使用者在 host 編輯或透過 Bootstrap 調整）
+- 使用者：node（非 root、無特權，沒有 sudo；系統套件需透過 Dockerfile 安裝，見下方）
+- 網路：出站受防火牆限制（由 host 從外部套用，容器內無法修改）。預設放行 Claude / OpenAI API、npm、PyPI、Go、crates.io、GitHub、VS Code 相關網域；專案額外放行的網域列在 /project-config.json 的 `extra_allowed_domains`
+- Port：若專案需要對外服務，實際 port 由 start.sh 分配並以環境變數傳入——app 必須監聽 `$PORT`（多個 port 時依序為 `$PORT_0`、`$PORT_1`…），不要寫死 port 數字；host 以相同的 port 存取
+- 搜尋：若專案啟用了 MCP Search（見 /project-config.json 的 `mcp_search`；你的工具中有 `mcp__search__*` 即代表可用），可使用以下 MCP 工具（容器本身不直接連網，搜尋透過 host 上的 MCP Search Server 代理）：
   - `mcp__search__web_search` — 網頁搜尋（輸入關鍵字，回傳搜尋結果列表）
   - `mcp__search__web_fetch` — 抓取網頁內容（輸入 URL，回傳文字內容，上限 100KB）
   - `mcp__search__web_download` — 下載檔案（輸入 URL + encoding text/base64，回傳檔案內容，上限 10MB）
-- 容器內已有：Node.js 20、git、基本開發工具
+- 容器內已有：Node.js 22、git、gh（GitHub CLI）、基本開發工具
 
 ## 首次啟動
 如果 /workspace 中尚未初始化 git，請先執行：
@@ -25,13 +27,14 @@ git config user.email "project@devcontainer.local"
 使用者可能會要求你使用他們自己的 git 身份。
 
 ## 語言和框架安裝
-此容器預裝 Node.js 20。若專案需要其他語言或框架：
+此容器預裝 Node.js 22。若專案需要其他語言或框架：
 
 1. **討論並確認**：與使用者討論最適合的語言/框架選擇
-2. **更新 Dockerfile**：在 repo/.devcontainer/Dockerfile 的 `# {{ADDITIONAL_PACKAGES}}` 位置加入安裝指令
+2. **更新 Dockerfile**：在 repo/.devcontainer/Dockerfile 的 `# {{ADDITIONAL_PACKAGES}}` 位置加入安裝指令（此位置以 root 執行）
    - Python：`RUN apt-get update && apt-get install -y python3 python3-pip python3-venv && rm -rf /var/lib/apt/lists/*`
-   - Go：`RUN curl -fsSL https://go.dev/dl/go1.22.linux-amd64.tar.gz | tar -C /usr/local -xzf - && echo 'export PATH=$PATH:/usr/local/go/bin' >> /home/node/.bashrc`
+   - Go：`RUN curl -fsSL https://go.dev/dl/go<版本>.linux-amd64.tar.gz | tar -C /usr/local -xzf - && echo 'export PATH=$PATH:/usr/local/go/bin' >> /home/node/.bashrc`（檔名的版本號含修訂號，例如 `go1.22.0`；最新穩定版請查 https://go.dev/dl/）
    - 其他語言類推
+   - 在回覆中清楚列出你對 Dockerfile 做了哪些修改，方便使用者 build 前 review
 3. **告知使用者重建**：更新 Dockerfile 後，告訴使用者需要退出容器並執行：
    ```
    ./scripts/build.sh
@@ -39,9 +42,9 @@ git config user.email "project@devcontainer.local"
    ./scripts/enter.sh
    claude --dangerously-skip-permissions
    ```
-4. **更新 project-config.json**：將 language/framework 從 `"undecided"` 更新為實際選擇
+4. **更新專案設定**：/project-config.json 在容器內是唯讀的，請使用者在 host 把 language/framework 從 `"undecided"` 更新為實際選擇
 
-npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）。
+npm、pip、go、cargo 套件可直接在容器內安裝（套件來源都在防火牆白名單中）。
 
 ## 開發流程
 
@@ -70,12 +73,12 @@ npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）
 5. 資料庫、生成檔案等存放在 /data
 6. 從 /secrets/ 讀取憑證，不要硬編碼
 7. 不要嘗試操作 Docker（容器內無 Docker）
-8. **防火牆限制處理**：容器的出站網路受防火牆白名單限制。當你嘗試安裝套件或下載資源失敗時（pip install、cargo install、curl 等），**必須立即主動告知使用者**：
-   - 明確說出哪個工具/套件安裝失敗
-   - 說明是防火牆限制導致
-   - 提供需要加入白名單的域名（如 `conda.anaconda.org`）
-   - 請使用者在 host 端協助（修改 init-firewall.sh 或在 Dockerfile build 階段預裝）
-   - **絕對不要**因為安裝失敗就靜默跳過或用低品質替代方案湊合
+8. **防火牆限制處理**：容器的出站網路受防火牆白名單限制。當安裝套件或下載資源失敗、且可能是被防火牆擋住時（連線被拒、逾時、DNS 查不到），**必須立即主動告知使用者**：
+   - 明確說出哪個工具/套件/網址失敗
+   - 說明可能是防火牆限制導致
+   - 提供需要放行的網域（如 `huggingface.co`、`conda.anaconda.org`）
+   - 請使用者在 host 的 `project-config.json` 把網域加入 `extra_allowed_domains`，再執行 `./scripts/firewall.sh`——不需重建、不需重啟容器，放行後即可直接重試
+   - **絕對不要**因為安裝失敗就靜默跳過或用低品質替代方案湊合，也不要嘗試繞過防火牆
 
 ## 自我管理（跨 Session 持續性）
 
@@ -102,17 +105,17 @@ npm 套件可直接在容器內安裝（npm registry 在防火牆白名單中）
 - **不要過度封裝**：單一命令不需要 skill，至少涉及 2 步以上
 
 ### Auto-memory
-- Claude Code 內建的 auto-memory 已啟用（需 v2.1.59+），會自動記錄你在工作中發現的模式和偏好
+- Claude Code 內建的 auto-memory 已啟用（需 v2.1.59+），會自動記錄你在工作中發現的偏好和模式
 - auto-memory 儲存在 `~/.claude/projects/<project>/memory/` 下，跨 session 持久
-- **不需要手動重複記錄** auto-memory 已涵蓋的內容（偏好、慣例、除錯心得）
+- auto-memory 會略過能從程式碼推導的內容（架構、檔案路徑、除錯修正）和 CLAUDE.md 已寫的內容；**不需要手動重複記錄** auto-memory 已涵蓋的偏好與慣例
 - **Rules 和 auto-memory 的分工**：
   - Rules（`.claude/rules/`）：目標、決策、約束 — 必須每次載入的硬性指導
-  - Auto-memory：偏好、模式、心得 — 軟性學習，自動管理
+  - Auto-memory：偏好、模式 — 軟性學習，自動管理
 
 ### MEMORY.md 紀律（重要）
-- auto-memory 的 `MEMORY.md` 每次 session 只載入**前 200 行或 25KB**（以先到者為準），超過部分不會自動載入
+- auto-memory 的 `MEMORY.md` 每次 session 只載入**前 200 行或 25KB**（以先到者為準；25KB 上限需 v2.1.83+，本容器安裝的版本符合），超過部分不會自動載入
 - 保持 `MEMORY.md` 為**簡潔索引**：每個記憶一行連結 + 短描述（< 150 字元）
-- 詳細內容寫在獨立主題檔（如 `debugging.md`、`patterns.md`），主題檔**不會**自動載入，需要時讀取
+- 詳細內容寫在獨立主題檔（如 `patterns.md`、`conventions.md`），主題檔**不會**自動載入，需要時讀取
 - 定期審視 `MEMORY.md`，把過時或冗餘項目移除
 
 ### Skill 生命週期
