@@ -77,7 +77,7 @@ cp -r "${TEMPLATE_SRC}/bootstrap/claude-config/commands/." "$PROJECT_DIR/.claude
 # 在 HOST 上從模板產生管理腳本（安全關鍵：Bootstrap 無法修改）
 # ============================================================
 echo "Generating management scripts..."
-for script in build.sh start.sh enter.sh stop.sh bootstrap.sh; do
+for script in build.sh start.sh enter.sh stop.sh bootstrap.sh firewall.sh; do
     sed -e "s|{{PROJECT_NAME}}|${PROJECT_NAME}|g" \
         -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
         -e "s|{{REPO_DIR}}|${BASE_DIR}|g" \

@@ -1,11 +1,11 @@
 FROM node:20
 
-# 基礎工具 + 防火牆工具（對齊官方 devcontainer）
+# 基礎工具（防火牆由 host 建置的 claude-dev-firewall image 從外部套用，開發 image 不含防火牆工具）
+# iproute2 與 curl 為 start.sh 所需（取得 host IP、MCP 健康檢查）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    less git procps sudo fzf zsh man-db gnupg2 gh \
-    iptables ipset iproute2 dnsutils jq \
+    less git procps fzf zsh man-db gnupg2 gh \
+    iproute2 dnsutils jq \
     nano vim curl tmux \
-    && (apt-get install -y --no-install-recommends aggregate || echo "WARN: aggregate not available") \
     && rm -rf /var/lib/apt/lists/*
 
 # === Bootstrap 會根據專案需求在此加入語言/框架套件 ===
@@ -40,14 +40,6 @@ ARG CACHEBUST_TOOLS=0
 
 # === Bootstrap 會根據是否啟用 gstack 在此加入 gstack 安裝 ===
 # {{GSTACK_INSTALL}}
-
-# 防火牆腳本 + 最小 sudo 權限（對齊官方）
-USER root
-COPY init-firewall.sh /usr/local/bin/init-firewall.sh
-RUN chmod +x /usr/local/bin/init-firewall.sh && \
-    echo "node ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/node-firewall && \
-    chmod 0440 /etc/sudoers.d/node-firewall
-USER node
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

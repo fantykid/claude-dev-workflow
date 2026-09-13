@@ -2,6 +2,7 @@
 set -euo pipefail
 PROJECT_NAME="{{PROJECT_NAME}}"
 PROJECT_DIR="{{PROJECT_DIR}}"
+REPO_DIR="{{REPO_DIR}}"
 CONTAINER="devcontainer-${PROJECT_NAME}"
 IMAGE="devcontainer-${PROJECT_NAME}:latest"
 
@@ -11,6 +12,14 @@ if ! command -v jq &> /dev/null; then
     echo "Install with: sudo apt-get install jq (Ubuntu/Debian) or brew install jq (macOS)"
     exit 1
 fi
+
+# host 端共用函式（防火牆 image、extra_allowed_domains 驗證與套用）
+if [ ! -f "${REPO_DIR}/lib/helpers.sh" ]; then
+    echo "Error: ${REPO_DIR}/lib/helpers.sh not found. Was the claude-dev-workflow repo moved or deleted?"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "${REPO_DIR}/lib/helpers.sh"
 
 CONFIG_FILE="${PROJECT_DIR}/project-config.json"
 
@@ -39,6 +48,11 @@ if [[ ! "$CONTAINER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || [ "$CONTAINER_USER" 
 fi
 CONTAINER_HOME="/home/${CONTAINER_USER}"
 
+# 專案額外放行的網域（格式不合法就中止）
+if ! EXTRA_DOMAINS=$(cdw_extra_allowed_domains "$CONFIG_FILE"); then
+    exit 1
+fi
+
 if [ -f "$CONFIG_FILE" ] && [ "$(jq -r '.gstack // false' "$CONFIG_FILE" 2>/dev/null || echo false)" = "true" ]; then
     echo "WARNING: gstack 支援已移除，project-config.json 的 gstack 設定會被忽略"
 fi
@@ -60,6 +74,12 @@ if [ "$AGENT" = "claude" ]; then
         echo "Fix with: chmod 600 $TOKEN_FILE"
         exit 1
     fi
+fi
+
+# 防火牆 image 必須在建立容器之前就緒：失敗就不啟動，不會出現沒有防火牆的容器
+if ! ensure_firewall_image "${REPO_DIR}/templates"; then
+    echo "ERROR: Firewall image is not available; refusing to start the container without a firewall."
+    exit 1
 fi
 
 # ============================================================
@@ -205,18 +225,11 @@ fi
 # （筆記 MCP 的 attach/設定移到防火牆之後，見下方 notes_mcp 區塊 — 防火牆規則為靜態，不需先 attach）
 
 # ============================================================
-# 透過外部一次性容器套用防火牆（共享 network namespace）
-# 容器本身無 NET_ADMIN，無法自行修改防火牆規則
+# 透過 host 建置的防火牆 image 套用防火牆（一次性容器，共享 network namespace）
+# 開發容器本身無 NET_ADMIN，也碰不到防火牆腳本，無法關閉或修改規則
 # ============================================================
-echo "Initializing firewall via external container..."
-if ! docker run --rm \
-    --user root \
-    --cap-drop=ALL \
-    --cap-add=NET_ADMIN \
-    --cap-add=NET_RAW \
-    --network "container:${CONTAINER}" \
-    "${IMAGE}" \
-    /usr/local/bin/init-firewall.sh; then
+echo "Initializing firewall via external container (${FIREWALL_IMAGE})..."
+if ! cdw_apply_firewall "${CONTAINER}" "${EXTRA_DOMAINS}"; then
     echo "ERROR: Firewall initialization failed."
     echo "Stopping container for safety — do not use without firewall."
     docker stop "${CONTAINER}" 2>/dev/null || true
@@ -355,7 +368,11 @@ echo ""
 echo "✓ Container started: ${CONTAINER}"
 echo "✓ Agent: ${AGENT}"
 echo "✓ Network: net-${PROJECT_NAME}"
-echo "✓ Firewall active (externally applied, tamper-proof)"
+echo "✓ Firewall active (host-managed image, tamper-proof)"
+if [ -n "$EXTRA_DOMAINS" ]; then
+    echo "  Extra allowed domains: ${EXTRA_DOMAINS}"
+fi
+echo "  需要放行其他網域：在 project-config.json 的 extra_allowed_domains 加入網域，再執行 ./scripts/firewall.sh（不需重啟）"
 if [ -n "$PORT_SUMMARY" ]; then
     echo "✓ Ports:"
     printf '%s' "$PORT_SUMMARY"
